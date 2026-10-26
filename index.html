@@ -327,7 +327,7 @@ function render() {
   disegnaNav();
   if (S.vuoto || !D) {
     app.innerHTML = ""; app.append(h("div", { class: "card" }, h("h2", { text: "In attesa dell'admin" }),
-      h("p", null, "Il gioco non è ancora stato pubblicato. L'admin deve aprire la sua app: appena parte, i dati compaiono qui da soli.")));
+      h("p", null, "Il gioco non è ancora stato pubblicato. L'admin deve caricarlo una volta dalla sua app: da lì in poi funziona tutto da qui, senza computer accesi.")));
     return;
   }
   const f = VISTE[vista.tab] || VISTE.classifica;
@@ -433,7 +433,7 @@ function colonneEventi() {
 VISTE.eventi = function (box) {
   vista.sub = vista.sub || "ultimi";
   const np = eventiPending().length;
-  box.append(sottoMenu([["ultimi", "Ultimi eventi"], ["pending", "Pending (" + np + ")"], ["proponi", "Proponi un evento"]], vista.sub));
+  box.append(sottoMenu([["ultimi", "Ultimi eventi"], ["pending", "Pending (" + np + ")"], ["proponi", io.ruolo === "admin" ? "Registra un evento" : "Proponi un evento"]], vista.sub));
   if (vista.sub === "ultimi") {
     const n = parseInt(ls.get("fm_righe", "15"), 10);
     const sel = h("select", { onchange: ev => { ls.set("fm_righe", ev.target.value); render(); } },
@@ -451,7 +451,7 @@ function vistaPending(box) {
   if (!pend.length) c.append(h("p", { text: "Nessun evento in pending." }));
   pend.sort((a, b) => b.id - a.id).forEach(e => {
     const az = D.azioni.find(a => a.id === e.azione_id);
-    const sond = az && az.modalita === "sondaggio";
+    const sond = az && az.modalita === "sondaggio" && Array.isArray(e.fascia);
     const [lo, hi] = e.fascia || (az ? [az.min, az.max] : [1, 10]);
     const gia = (e.votanti || []).includes(io.nome);
     const blocco = h("div", { class: "blocco" },
@@ -470,48 +470,98 @@ function vistaPending(box) {
         } })));
       } else if (gia) blocco.append(h("div", { class: "dim", text: "Hai già votato." }));
     }
+    if (io.ruolo === "admin") comandiPending(blocco, e, pend, sond, lo, hi);
     c.append(blocco);
   });
   box.append(c);
 }
+function comandiPending(blocco, e, pend, sond, lo, hi) {
+  const es = h("div", { class: "esito" }), r = h("div", { class: "riga" });
+  const gruppo = e.gruppo ? pend.filter(x => x.gruppo === e.gruppo) : [];
+  if (gruppo.length > 1) blocco.append(h("div", { class: "dim", text: "Vale per: " + gruppo.map(x => nomeMus(x.musicista_id) + (x.ruolo ? ` (${x.ruolo})` : "")).join(", ") }));
+  if (e.proposta_base != null) r.append(h("button", { class: "n", text: "Conferma come proposto", onclick: () => opAdmin("conferma", { id: e.id }, es) }));
+  else if (sond) {
+    const inp = h("input", { placeholder: `voti da aggiungere (${lo}-${hi}), es. 6 8 9`, inputmode: "numeric", oninput: () => sporco = true });
+    blocco.append(h("div", { class: "riga" }, inp));
+    r.append(h("button", { class: "n", text: "Salva i voti", onclick: () => opAdmin("voti", { id: e.id, voti: inp.value, modo: "salva" }, es) }),
+      h("button", { class: "n", text: "Chiudi con la media", onclick: () => opAdmin("voti", { id: e.id, voti: inp.value, modo: "chiudi" }, es) }),
+      h("button", { class: "n", text: "Azzera i voti", onclick: () => chiedi(`Azzerare i voti dell'evento #${e.id}?`, "Azzera", () => opAdmin("voti", { id: e.id, modo: "azzera" }, es)) }));
+  }
+  if (e.da_approvare) r.append(h("button", { class: "n", text: "Rifiuta ed elimina", onclick: () => chiedi(`Rifiutare la proposta #${e.id}${gruppo.length > 1 ? " (e quelle collegate del gruppo)" : ""}? Viene eliminata.`, "Rifiuta", () => opAdmin("rifiuta", { id: e.id }, es)) }));
+  blocco.append(r, es);
+}
+function chiedi(testo, si, f) {
+  apriModale(h("div", { class: "card" }, h("h2", { text: "Conferma" }), h("p", { text: testo }),
+    h("div", { class: "riga" }, h("button", { class: "n", text: si, onclick: () => { chiudiModale(); f(); } }), h("button", { class: "n", text: "Annulla", onclick: chiudiModale }))));
+}
+function parseVoti(t, lo, hi) {
+  const p = String(t || "").split(/[\s,;]+/).filter(Boolean);
+  if (!p.length) return null;
+  const v = [];
+  for (const x of p) { if (!/^\d{1,9}$/.test(x)) return null; const n = parseInt(x, 10); if (n < lo || n > hi) return null; v.push(n); }
+  return v;
+}
 const mediaVoti = voti => { const t = voti.reduce((a, b) => a + b, 0), m = Math.floor(t / voti.length); return m === 0 && t > 0 ? 1 : m; };
 
 function vistaProponi(box) {
-  if (io.ruolo !== "giocatore") return box.append(h("div", { class: "card" }, h("p", { text: "L'admin registra gli eventi dall'app." })));
+  const admin = io.ruolo === "admin";
+  if (!admin && io.ruolo !== "giocatore") return box.append(h("div", { class: "card" }, h("p", { text: "Non disponibile." })));
   if (!D.azioni.length || !D.musicisti.length) return box.append(h("div", { class: "card" }, h("p", { text: "Servono almeno un'azione e un musicista." })));
   const opzMus = D.musicisti.slice().sort((a, b) => a.nome.localeCompare(b.nome)).map(m => ({ id: m.id, t: `${m.nome} (${m.proprietario || "libero"})` }));
   const selMus = (sel) => h("select", { oninput: () => sporco = true }, opzMus.map(o => h("option", { value: o.id, text: o.t, selected: o.id === sel })));
   const selAz = h("select", { oninput: () => { sporco = true; disegna(); } }, D.azioni.map(a => h("option", { value: a.id, text: `${a.nome} (${descriviPunteggio(a)})` })));
+  const cbDitt = admin ? h("input", { type: "checkbox", onchange: () => { sporco = true; disegna(); } }) : null;
   const dyn = h("div"), esito = h("div", { class: "esito" });
   let st = null;
+  const ditt = () => !!(cbDitt && cbDitt.checked);
+  const nomeSel = s => s.options[s.selectedIndex].text.split(" (")[0];
   function anteprima() {
     if (!st) return;
-    const a = st.a;
-    if (a.modalita === "sondaggio") { st.prev.textContent = "Il punteggio dipenderà dal sondaggio: l'evento resta in pending."; return; }
+    const a = st.a, righe = [];
+    if (ditt()) {
+      st.sel.forEach((s, i) => { const v = parseInt(st.punti[i].value, 10); righe.push(`${nomeSel(s)}: ${isNaN(v) ? "?" : sgn(v)}`); });
+      st.altri.forEach(([s, p]) => { const v = parseInt(p.value, 10); if (!isNaN(v)) righe.push(`${nomeSel(s)}: ${sgn(v)}`); });
+      st.prev.textContent = "DITTATURA, punteggio finale - " + righe.join(" | ");
+      return;
+    }
+    if (a.modalita === "sondaggio" && !admin) { st.prev.textContent = "Il punteggio dipenderà dal sondaggio: l'evento resta in pending."; return; }
     const bonus = st.bonus.filter(([cb]) => cb.checked).map(([, b]) => b);
     const q = a.modalita === "tempo" ? parseFloat(String(st.qta.value).replace(",", ".")) : null;
     if (a.modalita === "tempo" && !(q > 0)) { st.prev.textContent = "Scrivi la quantità per vedere il punteggio."; return; }
-    const righe = st.sel.map((s, i) => {
-      const slot = st.slot[i], base = a.modalita === "tempo" ? Math.floor(q * slot.punti + 0.5) : slot.punti;
-      return `${s.options[s.selectedIndex].text.split(" (")[0]}: ${sgn(calcolaPunti(base, bonus))}`;
+    st.sel.forEach((s, i) => {
+      const slot = st.slot[i];
+      if (a.modalita === "sondaggio") {
+        const t = st.voto[i].value.trim();
+        if (!t) return righe.push(`${nomeSel(s)}: PENDING`);
+        const vv = parseVoti(t, slot.min, slot.max);
+        if (!vv) return righe.push(`${nomeSel(s)}: voti non validi`);
+        return righe.push(`${nomeSel(s)}: ${sgn(calcolaPunti(vv.length === 1 ? vv[0] : mediaVoti(vv), bonus))}`);
+      }
+      const base = a.modalita === "tempo" ? Math.floor(q * slot.punti + 0.5) : slot.punti;
+      righe.push(`${nomeSel(s)}: ${sgn(calcolaPunti(base, bonus))}`);
     });
-    st.altri.forEach(([s, p]) => { const v = parseInt(p.value, 10); if (!isNaN(v)) righe.push(`${s.options[s.selectedIndex].text.split(" (")[0]}: ${sgn(calcolaPunti(v, bonus))}`); });
-    st.prev.textContent = "Punteggio proposto - " + righe.join(" | ");
+    st.altri.forEach(([s, p]) => { const v = parseInt(p.value, 10); if (!isNaN(v)) righe.push(`${nomeSel(s)}: ${sgn(calcolaPunti(v, bonus))}`); });
+    st.prev.textContent = (admin ? "Punteggio - " : "Punteggio proposto - ") + righe.join(" | ");
   }
   function disegna() {
     dyn.innerHTML = "";
     const a = D.azioni.find(x => x.id === parseInt(selAz.value, 10));
-    const slot = slotAzione(a);
-    st = { a, slot, sel: [], voto: [], altri: [], bonus: [], qta: null, prev: h("div", { class: "dim", style: "margin-top:8px" }) };
+    const slot = slotAzione(a), d = ditt();
+    st = { a, slot, sel: [], voto: [], punti: [], altri: [], bonus: [], qta: null, prev: h("div", { class: "dim", style: "margin-top:8px" }) };
     slot.forEach((s, i) => {
-      const sm = selMus(); sm.addEventListener("input", anteprima); st.sel.push(sm);
+      const sm = selMus(opzMus[Math.min(i, opzMus.length - 1)].id); sm.addEventListener("input", anteprima); st.sel.push(sm);
       dyn.append(h("h3", { text: slot.length > 1 ? `Musicista «${s.ruolo}» (${descriviSlot(a, s)})` : `Musicista (${descriviSlot(a, s)})` }), sm);
-      if (a.modalita === "sondaggio") {
-        const v = h("input", { type: "number", min: s.min, max: s.max, inputmode: "numeric", placeholder: `il tuo voto ${s.min}-${s.max} (facoltativo)`, oninput: () => sporco = true });
-        st.voto.push(v); dyn.append(v);
-      }
+      if (d) {
+        const v = h("input", { type: "number", inputmode: "numeric", placeholder: "punteggio finale (anche negativo)", oninput: () => { sporco = true; anteprima(); } });
+        st.punti.push(v); st.voto.push(null); dyn.append(v);
+      } else if (a.modalita === "sondaggio") {
+        const v = admin
+          ? h("input", { inputmode: "numeric", placeholder: `voti da ${s.min} a ${s.max}, es. 7 oppure 6 8 9 (vuoto = resta in PENDING)`, oninput: () => { sporco = true; anteprima(); } })
+          : h("input", { type: "number", min: s.min, max: s.max, inputmode: "numeric", placeholder: `il tuo voto ${s.min}-${s.max} (facoltativo)`, oninput: () => sporco = true });
+        st.voto.push(v); st.punti.push(null); dyn.append(v);
+      } else { st.voto.push(null); st.punti.push(null); }
     });
-    if (a.modalita === "tempo") {
+    if (a.modalita === "tempo" && !d) {
       st.qta = h("input", { placeholder: `Quantità in ${a.unita} (es. 90 oppure 1,5)`, inputmode: "decimal", oninput: () => { sporco = true; anteprima(); } });
       dyn.append(h("h3", { text: "Quantità" }), st.qta);
     }
@@ -521,7 +571,7 @@ function vistaProponi(box) {
         const sm = selMus(), p = h("input", { type: "number", placeholder: "punti (anche negativi)", inputmode: "numeric", oninput: () => { sporco = true; anteprima(); } });
         sm.addEventListener("input", anteprima); st.altri.push([sm, p]); bl.append(h("div", { class: "riga" }, sm, p));
       } }));
-    const bonus = (a.bonus_ids || []).map(i => D.bonus.find(b => b.id === i)).filter(Boolean);
+    const bonus = d ? [] : (a.bonus_ids || []).map(i => D.bonus.find(b => b.id === i)).filter(Boolean);
     if (bonus.length) {
       dyn.append(h("h3", { text: "Bonus/malus da applicare" }));
       bonus.forEach(b => { const cb = h("input", { type: "checkbox", onchange: () => { sporco = true; anteprima(); } }); st.bonus.push([cb, b]); dyn.append(h("label", { class: "chk" }, cb, descriviBonus(b))); });
@@ -531,49 +581,55 @@ function vistaProponi(box) {
     anteprima();
   }
   disegna();
-  const invio = h("button", { class: "n", text: "Proponi l'evento", onclick: async () => {
-    const a = st.a;
+  const invio = h("button", { class: "n", text: admin ? "Registra l'evento" : "Proponi l'evento", onclick: async () => {
+    const a = st.a, d = ditt();
     const payload = { azione_id: a.id, nota: st.nota.value.trim(),
-      musicisti: st.sel.map((s, i) => ({ musicista_id: parseInt(s.value, 10), voto: st.voto[i] ? st.voto[i].value.trim() : "" })),
+      musicisti: st.sel.map((s, i) => ({ musicista_id: parseInt(s.value, 10), voto: st.voto[i] ? st.voto[i].value.trim() : "", punti: st.punti[i] ? st.punti[i].value.trim() : "" })),
       bonus_ids: st.bonus.filter(([cb]) => cb.checked).map(([, b]) => b.id),
       altri: st.altri.filter(([, p]) => p.value.trim() !== "").map(([s, p]) => ({ musicista_id: parseInt(s.value, 10), punti: parseInt(p.value, 10) })) };
-    if (a.modalita === "tempo") payload.quantita = st.qta.value.trim();
-    if (await invia("evento", payload, esito)) { sporco = false; vista.sub = "pending"; render(); }
+    if (a.modalita === "tempo" && !d) payload.quantita = st.qta.value.trim();
+    invio.disabled = true;
+    let ok;
+    if (admin) { payload.dittatura = d; ok = await opAdmin("registra", payload, esito); }
+    else ok = await invia("evento", payload, esito);
+    invio.disabled = false;
+    if (ok && vista.tab === "eventi") { sporco = false; vista.sub = admin ? "ultimi" : "pending"; render(); }
   } });
-  box.append(h("div", { class: "card" }, h("h2", { text: "Proponi un evento" }),
-    h("p", { class: "dim", text: "Scegli l'azione e i musicisti. L'evento va in pending finché l'admin non lo conferma. Nei sondaggi puoi mettere il tuo voto." }),
-    selAz, dyn, h("div", { class: "riga" }, invio), esito));
+  box.append(h("div", { class: "card" }, h("h2", { text: admin ? "Registra un evento" : "Proponi un evento" }),
+    h("p", { class: "dim", text: admin ? "L'evento vale subito. Nei sondaggi puoi scrivere uno o più voti (media) oppure lasciare vuoto: resta in pending."
+      : "Scegli l'azione e i musicisti. L'evento va in pending finché l'admin non lo conferma. Nei sondaggi puoi mettere il tuo voto." }),
+    selAz, admin ? h("label", { class: "chk" }, cbDitt, "DITTATURA: punteggio finale deciso da te, senza sondaggi, tempo né bonus") : null,
+    dyn, h("div", { class: "riga" }, invio), esito));
 }
 
-// ----- richieste ai server (applicate dall'app dell'admin) -----
-const noteRich = new Map();
+// ----- richieste e operazioni: applicate subito dal database con le regole del gioco -----
+function mostraEsito(esitoEl, t, err) { if (esitoEl) { esitoEl.className = "esito " + (err ? "err" : "ok"); esitoEl.textContent = t; } toast(t, err); }
 async function invia(tipo, payload, esitoEl) {
-  const mostra = (t, err) => { if (esitoEl) { esitoEl.className = "esito " + (err ? "err" : "ok"); esitoEl.textContent = t; } toast(t, err); };
   try {
     const r = await rpc("fm_invia", { p_codice: io.codice, p_tipo: tipo, p_payload: payload });
-    if (!r.ok) { mostra(r.errore, true); return false; }
-    noteRich.set(r.id, "nuova");
-    toast("Richiesta inviata: l'admin la applica a breve...");
-    beep(660, 70);
-    carica();
+    if (!r.ok) { mostraEsito(esitoEl, r.errore || r.messaggio || "Richiesta respinta", true); beep(200, 200); carica().catch(() => {}); return false; }
+    sporco = false; await carica().catch(() => {});
+    mostraEsito(esitoEl, r.messaggio || "Fatto."); beep(660, 70);
     return true;
-  } catch (e) { mostra("Errore di connessione: " + e.message, true); return false; }
+  } catch (e) { mostraEsito(esitoEl, "Errore di connessione: " + e.message, true); return false; }
 }
-function notificaRichieste() {
-  (S.richieste || []).forEach(r => {
-    const prima = noteRich.get(r.id);
-    if (prima === "nuova" && r.stato !== "nuova") toast(r.messaggio || (r.stato === "ok" ? "Fatto." : "Richiesta respinta."), r.stato === "errore");
-    noteRich.set(r.id, r.stato);
-  });
-  const n = (S.richieste || []).filter(r => r.stato === "nuova").length;
-  $("#btnRich").textContent = "Richieste" + (n ? ` (${n} in attesa)` : "");
+async function opAdmin(tipo, payload, esitoEl) {
+  try {
+    const r = await rpc("fm_a_op", { p_admin: io.codice, p_tipo: tipo, p_payload: payload });
+    if (!r.ok) { mostraEsito(esitoEl, r.errore || "Operazione non riuscita", true); beep(200, 200); return false; }
+    sporco = false; await carica().catch(() => {});
+    mostraEsito(esitoEl, r.messaggio || "Fatto."); beep(660, 70);
+    return true;
+  } catch (e) { mostraEsito(esitoEl, "Errore di connessione: " + e.message, true); return false; }
 }
+function notificaRichieste() { $("#btnRich").textContent = "Le mie richieste"; }
 $("#btnRich").onclick = () => {
   const r = S.richieste || [];
   const nomi = { evento: "Evento proposto", scambio_proponi: "Proposta di scambio", scambio_rispondi: "Risposta a uno scambio", pref_soprannome: "Soprannome", pref_sopr_musicista: "Soprannome musicista", voto: "Voto" };
   apriModale(h("div", { class: "card" }, h("h2", { text: "Le mie richieste" }),
     r.length ? h("ul", { class: "lista", style: "max-height:none" }, r.map(x => h("li", null, h("span", null, `${nomi[x.tipo] || x.tipo}`, h("div", { class: "dim", text: x.messaggio || "" })),
       h("span", { class: x.stato === "errore" ? "neg" : x.stato === "ok" ? "" : "pend", text: x.stato === "nuova" ? "IN ATTESA" : x.stato === "ok" ? "FATTO" : "RESPINTA" })))) : h("p", { text: "Nessuna richiesta." }),
+    h("p", { class: "dim", text: "Le richieste vengono applicate subito: qui c'è lo storico degli ultimi giorni." }),
     h("div", { class: "riga" }, h("button", { class: "n", onclick: chiudiModale, text: "Chiudi" }))));
 };
 
@@ -582,7 +638,9 @@ VISTE.mercato = function (box) {
   vista.sub = vista.sub || "sospeso";
   const imp = D.impostazioni, fatti = io.ruolo === "giocatore" ? scambiFatti(io.nome) : 0, max = imp.scambi_max === undefined ? 3 : imp.scambi_max;
   box.append(h("div", { class: "card" }, h("h2", { text: "Mercato e scambi" }),
-    h("p", null, `Mercato ${imp.mercato_aperto === false ? "CHIUSO" : "APERTO"}`, io.ruolo === "giocatore" ? ` - i tuoi scambi: ${fatti}/${max}` : "")));
+    h("p", null, `Mercato ${imp.mercato_aperto === false ? "CHIUSO" : "APERTO"}`, io.ruolo === "giocatore" ? ` - i tuoi scambi: ${fatti}/${max}` : ""),
+    io.ruolo === "admin" ? h("div", { class: "riga" }, h("button", { class: "n auto", text: imp.mercato_aperto === false ? "Apri il mercato" : "Chiudi il mercato",
+      onclick: () => opAdmin("mercato", { aperto: imp.mercato_aperto === false }) })) : null));
   box.append(sottoMenu([["sospeso", "Proposte in sospeso"], ["nuova", "Nuova proposta"], ["storico", "Storico"]], vista.sub));
   if (vista.sub === "nuova") return vistaNuovaProposta(box);
   const colScambi = [
@@ -650,7 +708,7 @@ function vistaNuovaProposta(box) {
   }
   invio.onclick = async () => {
     const p = { a: dest.value, offro: selezionati(cbMie), chiedo: selezionati(cbLoro), crediti: parseInt(crd.value, 10) || 0 };
-    if (await invia("scambio_proponi", p, esito)) { sporco = false; vista.sub = "sospeso"; render(); }
+    if (await invia("scambio_proponi", p, esito) && vista.tab === "mercato") { sporco = false; vista.sub = "sospeso"; render(); }
   };
   ridisegna();
   box.append(h("div", { class: "card" }, h("h2", { text: "Nuova proposta (scambio o vendita)" }),
@@ -739,7 +797,15 @@ VISTE.storico = function (box) {
 // ----- impostazioni -----
 VISTE.impost = function (box) {
   vista.sub = vista.sub || "pref";
-  box.append(sottoMenu([["pref", "Preferenze"], ["sopr", "Soprannomi musicisti"], ["stag", "Impostazioni stagione"]], vista.sub));
+  box.append(sottoMenu([["pref", "Preferenze"], ["sopr", "Soprannomi musicisti"], ["stag", "Impostazioni stagione"]].concat(io.ruolo === "admin" ? [["codici", "Codici giocatori"]] : []), vista.sub));
+  if (vista.sub === "codici" && io.ruolo === "admin") {
+    const cod = S.codici || {}, url = location.href.split("#")[0].split("?")[0];
+    const testo = "FantaBanda: " + url + "\n" + Object.entries(cod).map(([n, c]) => `${n}: ${c}`).join("\n");
+    return box.append(h("div", { class: "card" }, h("h2", { text: "Codici dei giocatori" }),
+      h("p", { class: "dim", text: "Manda a ognuno il suo codice e l'indirizzo di questa pagina. I codici si rigenerano dall'app (GIOCO ONLINE > CODICI DEI GIOCATORI)." }),
+      Object.keys(cod).length ? h("table", null, h("tbody", null, Object.entries(cod).map(([n, c]) => h("tr", null, h("td", { text: n }), h("td", null, h("b", { text: c })))))) : h("p", { text: "Nessun codice." }),
+      h("div", { class: "riga" }, h("button", { class: "n auto", text: "Copia tutto", onclick: () => copia(testo) }))));
+  }
   if (vista.sub === "pref") {
     const sop = h("input", { maxlength: 20, value: (S.prefs && S.prefs.soprannome) || "", placeholder: "soprannome (max 20 caratteri)", oninput: () => sporco = true });
     const sc = h("select", { onchange: ev => { ls.set("fm_scala", ev.target.value); document.body.dataset.scala = ev.target.value; } },
@@ -768,6 +834,11 @@ VISTE.impost = function (box) {
   }
 };
 
+function copia(testo) {
+  const vecchio = () => { const t = h("textarea", { style: "position:fixed;left:-999px" }); t.value = testo; document.body.append(t); t.select(); try { document.execCommand("copy"); toast("Copiato."); } catch (e) { toast("Copia non riuscita: seleziona il testo a mano", true); } t.remove(); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(testo).then(() => toast("Copiato."), vecchio); else vecchio();
+}
+
 // ---------------------------------------------------------------------------------------------
 // Asta live
 // ---------------------------------------------------------------------------------------------
@@ -788,8 +859,16 @@ VISTE.asta = function (box) {
     h("div", { class: "riga", id: "as-rapidi" }),
     h("div", { class: "riga" }, h("input", { id: "as-importo", type: "number", inputmode: "numeric", min: 1, placeholder: "Importo" }),
       h("button", { class: "n auto", id: "as-rilancia", text: "Rilancia", onclick: () => { const v = parseInt($("#as-importo").value, 10); if (isNaN(v)) return asEsito("Scrivi un importo", true); rilancia(v); } })));
+  const btn = (t, f) => h("button", { class: "n", text: t, onclick: f });
+  const testo = h("input", { id: "as-testo", maxlength: 300, placeholder: "messaggio nel canale dell'asta" });
+  const comandi = io.ruolo !== "admin" ? null : h("div", { id: "as-admin" },
+    h("div", { class: "riga" }, btn("Aggiudica", aggiudicaAsta), btn("Annulla asta", annullaAsta)),
+    h("div", { class: "riga" }, btn("Poco tempo!", () => msgAsta("Poco tempo!")), btn("Ultima chiamata!", () => msgAsta("Ultima chiamata!"))),
+    h("div", { class: "riga" }, btn("Conto 5", () => contoAsta(5)), btn("Conto 10", () => contoAsta(10))),
+    h("div", { class: "riga" }, testo, h("button", { class: "n auto", text: "Invia", onclick: () => { if (testo.value.trim()) { msgAsta(testo.value.trim()); testo.value = ""; } } })),
+    h("p", { class: "dim", text: "Per aprire un'asta tocca «Metti in asta» accanto a un musicista disponibile (qui sotto)." }));
   sinistra.append(h("div", { class: "card" }, h("h2", { text: "In asta" }), h("div", { class: "grande", id: "as-musicista", text: "Nessuna asta aperta" }),
-    h("div", { class: "dim", id: "as-miglior", style: "margin-top:6px" }), h("div", { class: "dim", id: "as-miei", style: "margin-top:6px" }), controlli, h("div", { class: "esito", id: "as-esito" })),
+    h("div", { class: "dim", id: "as-miglior", style: "margin-top:6px" }), h("div", { class: "dim", id: "as-miei", style: "margin-top:6px" }), controlli, comandi, h("div", { class: "esito", id: "as-esito" })),
     h("div", { class: "card" }, h("h2", { text: "Offerte" }), h("ul", { class: "lista", id: "as-offerte" })));
   destra.append(h("div", { class: "card" }, h("h2", { text: "Canale dell'asta" }), h("div", { class: "lista", id: "as-messaggi" })),
     h("div", { class: "card" }, h("h2", null, "Squadre ", h("span", { class: "dim", id: "as-online" })), h("ul", { class: "lista", id: "as-squadre", style: "max-height:none" })));
@@ -837,7 +916,8 @@ function disegnaAsta() {
   const l1 = $("#as-liberi"), l2 = $("#as-assegnati"); l1.innerHTML = ""; l2.innerHTML = "";
   A.musicisti.forEach(m => {
     if (m.proprietario) l2.append(h("li", null, h("span", { text: m.nome }), h("span", { class: "dim", text: `${m.proprietario} - ${m.prezzo} cr.` })));
-    else l1.append(h("li", null, h("span", { text: m.nome }), c.aperta && c.musicista_id === m.id ? h("span", { class: "tag", text: "IN ASTA" }) : null));
+    else l1.append(h("li", null, h("span", { text: m.nome }), c.aperta && c.musicista_id === m.id ? h("span", { class: "tag", text: "IN ASTA" })
+      : io.ruolo === "admin" ? h("button", { class: "n picc", text: "Metti in asta", disabled: !!c.aperta, onclick: () => apriAsta(m) }) : null));
   });
   if (!l1.children.length) l1.append(h("li", { class: "dim", text: "Nessuno" }));
   if (!l2.children.length) l2.append(h("li", { class: "dim", text: "Nessuno" }));
@@ -850,6 +930,43 @@ async function rilancia(importo) {
     asEsito("Offerta di " + importo + " inviata"); const i = $("#as-importo"); if (i) i.value = "";
     caricaAsta().catch(() => {});
   } catch (e) { asEsito("Errore: " + e.message, true); }
+}
+// comandi dell'admin (codice admin)
+async function adminAsta(fn, par, okMsg) {
+  try {
+    const r = await rpc(fn, Object.assign({ p_admin: io.codice }, par || {}));
+    if (r && r.ok === false) { asEsito(r.errore || "Errore", true); beep(200, 250); return null; }
+    if (okMsg) asEsito(okMsg);
+    await caricaAsta();
+    return r || {};
+  } catch (e) { asEsito("Errore: " + e.message, true); return null; }
+}
+function apriAsta(m) {
+  const rl = Math.max(1, (D && D.impostazioni.rilancio_minimo) || 1);
+  chiedi(`Mettere in asta ${m.nome}? Base 1 credito, rilancio minimo ${rl}.`, "Apri l'asta", () => adminAsta("asta_a_apri", { p_musicista_id: m.id, p_rilancio: rl }, "Asta aperta: " + m.nome));
+}
+function aggiudicaAsta() {
+  const c = (A && A.corr) || {};
+  if (!c.aperta) return asEsito("Nessuna asta aperta", true);
+  if (c.miglior_importo == null) return asEsito("Nessuna offerta: aspetta un rilancio oppure annulla l'asta", true);
+  chiedi(`Aggiudicare ${c.musicista} a ${c.miglior_offerente} per ${c.miglior_importo} crediti?`, "Aggiudica", async () => {
+    const r = await adminAsta("asta_a_aggiudica", {}, null);
+    if (r) { asEsito(`AGGIUDICATO: ${r.musicista} a ${r.giocatore} per ${r.importo} crediti`); carica().catch(() => {}); }
+  });
+}
+function annullaAsta() {
+  const c = (A && A.corr) || {};
+  if (!c.aperta) return asEsito("Nessuna asta aperta", true);
+  chiedi(`Annullare l'asta di ${c.musicista}? Le offerte vengono cancellate.`, "Annulla l'asta", () => adminAsta("asta_a_annulla", {}, "Asta annullata"));
+}
+const msgAsta = t => adminAsta("asta_a_messaggio", { p_testo: t }, "Messaggio inviato");
+let contoTimer = null;
+function contoAsta(n) {
+  clearInterval(contoTimer);
+  let k = n;
+  const passo = () => { rpc("asta_a_messaggio", { p_admin: io.codice, p_testo: String(k) }).catch(() => {}); k--; if (k <= 0) clearInterval(contoTimer); };
+  passo();
+  contoTimer = setInterval(passo, 1000);
 }
 function nuovoMessaggio(testo) {
   if (/^\d{1,3}$/.test(testo.trim())) {
@@ -873,7 +990,7 @@ async function carica() {
   const r = await rpc("fm_leggi", { p_codice: io.codice });
   if (!r.ok) throw new Error(r.errore || "Accesso negato");
   S.vuoto = !!r.vuoto;
-  if (!r.vuoto) { S.dati = r.dati; S.versione = r.versione; S.prefs = r.prefs || {}; S.richieste = r.richieste || []; indicizza(); notificaRichieste(); }
+  if (!r.vuoto) { S.dati = r.dati; S.versione = r.versione; S.prefs = r.prefs || {}; S.richieste = r.richieste || []; S.codici = r.codici || null; indicizza(); notificaRichieste(); }
   if (!sporco && !(vista.tab === "asta" && $("#as-root"))) render(); else disegnaNav();
   ultimoOk = Date.now();
 }
@@ -904,7 +1021,7 @@ async function entra(codice) {
   $("#login").classList.add("nascosto"); $("#app").classList.remove("nascosto"); $("#nav").classList.remove("nascosto");
   $("#esci").classList.remove("nascosto");
   if (io.ruolo === "giocatore") $("#btnRich").classList.remove("nascosto");
-  $("#chi").textContent = io.ruolo === "admin" ? "Osservatore (admin)" : io.nome;
+  $("#chi").textContent = io.ruolo === "admin" ? "ADMIN" : io.nome;
   try { await carica(); } catch (e) { $("#app").append(h("div", { class: "card esito err", text: "Errore: " + e.message })); }
   try { const m = await rpc("fm_versione"); ultimoM = m.m; firma = `${m.v}|${m.n}|${m.e}`; controlla.a = m.a; } catch (e) {}
   timers.push(setInterval(controlla, 2500));
