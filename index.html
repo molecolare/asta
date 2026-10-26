@@ -224,7 +224,11 @@ const descriviBonus = b => `${b.nome} (${sgn(b.valore)}${b.tipo === "percentuale
 function descriviCalcolo(e) {
   const p = [];
   if (e.dittatura) p.push("DITTATURA"); else if (e.dettaglio) p.push(e.dettaglio);
-  if ((e.bonus || []).length && !e.dittatura) { if (e.base !== null && e.base !== undefined) p.push("base " + e.base); e.bonus.forEach(b => p.push(descriviBonus(b))); }
+  if (((e.bonus || []).length || (e.bonus_auto || []).length) && !e.dittatura) {
+    if (e.base !== null && e.base !== undefined) p.push("base " + e.base);
+    (e.bonus || []).forEach(b => p.push(descriviBonus(b)));
+    (e.bonus_auto || []).forEach(b => p.push(descriviBonus(b)));
+  }
   if (e.ruolo) p.push("ruolo " + e.ruolo);
   if (e.gruppo) p.push("gruppo " + e.gruppo);
   return p.join("; ");
@@ -494,6 +498,13 @@ function chiedi(testo, si, f) {
   apriModale(h("div", { class: "card" }, h("h2", { text: "Conferma" }), h("p", { text: testo }),
     h("div", { class: "riga" }, h("button", { class: "n", text: si, onclick: () => { chiudiModale(); f(); } }), h("button", { class: "n", text: "Annulla", onclick: chiudiModale }))));
 }
+function parseRange(t) {
+  t = String(t || "").trim().toLowerCase().replace(/[–—]/g, "-").replace(/\s*a\s*/g, "-").replace(/\s+/g, "");
+  const p = t.split("-");
+  if (p.length !== 2 || !/^[0-9]+$/.test(p[0]) || !/^[0-9]+$/.test(p[1])) return null;
+  const lo = parseInt(p[0], 10), hi = parseInt(p[1], 10);
+  return lo < hi ? [lo, hi] : null;
+}
 function parseVoti(t, lo, hi) {
   const p = String(t || "").split(/[\s,;]+/).filter(Boolean);
   if (!p.length) return null;
@@ -524,6 +535,11 @@ function vistaProponi(box) {
       st.prev.textContent = "DITTATURA, punteggio finale - " + righe.join(" | ");
       return;
     }
+    const pLibero = t => {
+      t = t.trim(); if (!t) return null;
+      const r = parseRange(t); if (r) return { range: r };
+      const v = parseInt(t, 10); return isNaN(v) ? { errore: true } : { fisso: v };
+    };
     if (a.modalita === "sondaggio" && !admin) { st.prev.textContent = "Il punteggio dipenderà dal sondaggio: l'evento resta in pending."; return; }
     const bonus = st.bonus.filter(([cb]) => cb.checked).map(([, b]) => b);
     const q = a.modalita === "tempo" ? parseFloat(String(st.qta.value).replace(",", ".")) : null;
@@ -540,7 +556,13 @@ function vistaProponi(box) {
       const base = a.modalita === "tempo" ? Math.floor(q * slot.punti + 0.5) : slot.punti;
       righe.push(`${nomeSel(s)}: ${sgn(calcolaPunti(base, bonus))}`);
     });
-    st.altri.forEach(([s, p]) => { const v = parseInt(p.value, 10); if (!isNaN(v)) righe.push(`${nomeSel(s)}: ${sgn(calcolaPunti(v, bonus))}`); });
+    st.altri.forEach(([s, p]) => {
+      const esito = pLibero(p.value);
+      if (!esito) return;
+      if (esito.errore) return righe.push(`${nomeSel(s)}: punteggio non valido`);
+      if (esito.range) return righe.push(`${nomeSel(s)}: PENDING (voto ${esito.range[0]}-${esito.range[1]})`);
+      righe.push(`${nomeSel(s)}: ${sgn(calcolaPunti(esito.fisso, bonus))}`);
+    });
     st.prev.textContent = (admin ? "Punteggio - " : "Punteggio proposto - ") + righe.join(" | ");
   }
   function disegna() {
@@ -568,7 +590,7 @@ function vistaProponi(box) {
     const bl = h("div");
     dyn.append(h("h3", { text: "Altri musicisti coinvolti (facoltativo)" }), bl,
       h("button", { class: "n picc", text: "+ aggiungi musicista", onclick: () => {
-        const sm = selMus(), p = h("input", { type: "number", placeholder: "punti (anche negativi)", inputmode: "numeric", oninput: () => { sporco = true; anteprima(); } });
+        const sm = selMus(), p = h("input", { placeholder: "punti (es. -3, 7) oppure un range per sondaggio (es. 4-9)", oninput: () => { sporco = true; anteprima(); } });
         sm.addEventListener("input", anteprima); st.altri.push([sm, p]); bl.append(h("div", { class: "riga" }, sm, p));
       } }));
     const bonus = d ? [] : (a.bonus_ids || []).map(i => D.bonus.find(b => b.id === i)).filter(Boolean);
@@ -586,7 +608,7 @@ function vistaProponi(box) {
     const payload = { azione_id: a.id, nota: st.nota.value.trim(),
       musicisti: st.sel.map((s, i) => ({ musicista_id: parseInt(s.value, 10), voto: st.voto[i] ? st.voto[i].value.trim() : "", punti: st.punti[i] ? st.punti[i].value.trim() : "" })),
       bonus_ids: st.bonus.filter(([cb]) => cb.checked).map(([, b]) => b.id),
-      altri: st.altri.filter(([, p]) => p.value.trim() !== "").map(([s, p]) => ({ musicista_id: parseInt(s.value, 10), punti: parseInt(p.value, 10) })) };
+      altri: st.altri.filter(([, p]) => p.value.trim() !== "").map(([s, p]) => ({ musicista_id: parseInt(s.value, 10), punti: p.value.trim() })) };
     if (a.modalita === "tempo" && !d) payload.quantita = st.qta.value.trim();
     invio.disabled = true;
     let ok;
