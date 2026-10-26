@@ -3,61 +3,101 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FantaMusica - Asta live</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<title>FantaBanda</title>
 <style>
-  :root { --bg1:#010d08; --bg2:#05381c; --accent:#40ff80; --accent2:#b3ff59; --testo:#b8ffcc; --panel:rgba(5,28,16,.82); --rosso:#ff5a5a; }
-  [data-tema="blu"]     { --bg1:#020814; --bg2:#08204d; --accent:#33bfff; --accent2:#73f2ff; --testo:#bfe5ff; --panel:rgba(5,18,43,.82); }
-  [data-tema="arancio"] { --bg1:#120803; --bg2:#472105; --accent:#ff8c1f; --accent2:#ffcc40; --testo:#ffdfb8; --panel:rgba(36,15,5,.82); }
+  :root { --bg1:#010d08; --bg2:#05381c; --accent:#40ff80; --accent2:#b3ff59; --testo:#b8ffcc; --panel:rgba(5,28,16,.86); --rosso:#ff5a5a; --fs:15px; }
+  [data-tema="blu"]     { --bg1:#020814; --bg2:#08204d; --accent:#33bfff; --accent2:#73f2ff; --testo:#bfe5ff; --panel:rgba(5,18,43,.86); }
+  [data-tema="arancio"] { --bg1:#120803; --bg2:#472105; --accent:#ff8c1f; --accent2:#ffcc40; --testo:#ffdfb8; --panel:rgba(36,15,5,.86); }
+  [data-scala="0"] { --fs:13px; } [data-scala="2"] { --fs:17px; }
   * { box-sizing: border-box; }
   html, body { margin: 0; min-height: 100%; }
   body { font-family: "Courier New", ui-monospace, Menlo, Consolas, monospace; color: var(--testo);
-         background: linear-gradient(0deg, var(--bg2), var(--bg1)) fixed; font-size: 15px; }
-  header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--accent);
-           background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
-  h1 { font-size: 18px; margin: 0; color: var(--accent); letter-spacing: 1px; flex: 1; text-shadow: 0 0 8px var(--accent); }
-  h2 { font-size: 13px; margin: 0 0 8px; color: var(--accent2); letter-spacing: 1px; text-transform: uppercase; }
-  .temi button { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--testo); margin-left: 6px; cursor: pointer; padding: 0; }
-  main { max-width: 1100px; margin: 0 auto; padding: 14px; display: grid; gap: 14px; grid-template-columns: 1fr; }
-  @media (min-width: 900px) { main.griglia { grid-template-columns: 1.15fr 1fr; } }
-  .card { background: var(--panel); border: 1px solid var(--accent); padding: 14px; box-shadow: 0 0 14px rgba(0,0,0,.35), inset 0 0 18px rgba(0,0,0,.25); }
-  .grande { font-size: 24px; color: var(--accent); font-weight: bold; text-shadow: 0 0 8px var(--accent); word-break: break-word; }
-  .dim { opacity: .7; font-size: 13px; }
-  input { font: inherit; background: var(--bg1); color: var(--testo); border: 1px solid var(--accent); padding: 10px; width: 100%; }
+         background: linear-gradient(0deg, var(--bg2), var(--bg1)) fixed; font-size: var(--fs); }
+  #top { position: sticky; top: 0; z-index: 8; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--accent);
+           background: var(--bg1); flex-wrap: wrap; }
+  h1 { font-size: 1.2em; margin: 0; color: var(--accent); letter-spacing: 1px; flex: 1; text-shadow: 0 0 8px var(--accent); white-space: nowrap; }
+  h2 { font-size: .9em; margin: 0 0 8px; color: var(--accent2); letter-spacing: 1px; text-transform: uppercase; }
+  h3 { font-size: .95em; margin: 14px 0 6px; color: var(--accent2); }
+  .temi button { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--testo); margin-left: 5px; cursor: pointer; padding: 0; }
+  nav { display: flex; gap: 6px; overflow-x: auto; padding: 8px 14px; background: var(--bg1); border-bottom: 1px solid rgba(255,255,255,.12);
+        -webkit-overflow-scrolling: touch; }
+  nav button, .sub button { white-space: nowrap; }
+  main { max-width: 1150px; margin: 0 auto; padding: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--accent); padding: 14px; margin-bottom: 14px;
+          box-shadow: 0 0 14px rgba(0,0,0,.35), inset 0 0 18px rgba(0,0,0,.25); }
+  .grid2 { display: grid; gap: 14px; grid-template-columns: 1fr; }
+  @media (min-width: 900px) { .grid2 { grid-template-columns: 1.15fr 1fr; } }
+  .grande { font-size: 1.6em; color: var(--accent); font-weight: bold; text-shadow: 0 0 8px var(--accent); word-break: break-word; }
+  .dim { opacity: .72; font-size: .88em; }
+  input, select, textarea { font: inherit; background: var(--bg1); color: var(--testo); border: 1px solid var(--accent); padding: 9px; width: 100%; }
+  textarea { min-height: 60px; }
+  input[type=checkbox] { width: auto; margin-right: 8px; transform: scale(1.2); }
+  label.chk { display: flex; align-items: center; padding: 5px 0; }
   button.n { font: inherit; font-weight: bold; color: var(--accent); background: rgba(0,0,0,.25); border: 1px solid var(--accent);
-             padding: 10px 14px; cursor: pointer; text-transform: uppercase; box-shadow: 0 0 8px rgba(0,0,0,.4); }
-  button.n:hover:not(:disabled) { background: var(--accent); color: var(--bg1); }
+             padding: 8px 12px; cursor: pointer; text-transform: uppercase; box-shadow: 0 0 8px rgba(0,0,0,.4); }
+  button.n:hover:not(:disabled), button.n.on { background: var(--accent); color: var(--bg1); }
   button.n:disabled { opacity: .35; cursor: not-allowed; }
-  .riga { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  button.n.picc { padding: 3px 8px; font-size: .85em; }
+  .riga { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
   .riga > * { flex: 1; min-width: 70px; }
-  .lista { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow: auto; }
+  .riga > .auto { flex: 0 0 auto; }
+  .sub { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tab-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .92em; }
+  th, td { padding: 6px 8px; border-bottom: 1px dashed rgba(255,255,255,.14); text-align: left; vertical-align: top; }
+  th { color: var(--accent2); font-weight: normal; white-space: nowrap; user-select: none; }
+  th.ord { cursor: pointer; } th.ord:hover { color: var(--accent); }
+  td.r, th.r { text-align: right; }
+  tr.io td { color: var(--accent2); }
+  tr.cl { cursor: pointer; } tr.cl:hover td { background: rgba(255,255,255,.06); }
+  .pos { color: var(--accent); font-weight: bold; }
+  .pend { color: var(--accent2); }
+  .neg { color: var(--rosso); }
+  .lista { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; }
   .lista li { padding: 6px 4px; border-bottom: 1px dashed rgba(255,255,255,.12); display: flex; justify-content: space-between; gap: 8px; }
   .lista li.io { color: var(--accent2); }
-  .msg { padding: 6px 4px; border-bottom: 1px dashed rgba(255,255,255,.12); }
-  .msg.admin { color: var(--accent2); }
+  .msg { padding: 6px 4px; border-bottom: 1px dashed rgba(255,255,255,.12); color: var(--accent2); }
   .esito { min-height: 22px; margin-top: 8px; font-weight: bold; }
   .esito.err { color: var(--rosso); } .esito.ok { color: var(--accent); }
   .punto { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #555; margin-right: 6px; }
   .punto.on { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .av { display: inline-flex; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--accent); align-items: center; justify-content: center;
+        font-size: .75em; color: var(--accent); margin-right: 8px; flex: 0 0 auto; background: rgba(0,0,0,.3); }
+  .nome { display: inline-flex; align-items: center; }
   #login { max-width: 420px; margin: 40px auto; }
-  #banner { display: none; padding: 12px 16px; background: var(--accent); color: var(--bg1); font-weight: bold; text-align: center; font-size: 18px; position: sticky; top: 54px; z-index: 4; }
-  #conto { display: none; position: fixed; inset: 0; z-index: 20; align-items: center; justify-content: center; font-size: 38vw;
+  #banner { display: none; padding: 12px 16px; background: var(--accent); color: var(--bg1); font-weight: bold; text-align: center; font-size: 1.2em; }
+  #conto { display: none; position: fixed; inset: 0; z-index: 30; align-items: center; justify-content: center; font-size: 38vw;
            font-weight: bold; color: var(--accent); background: rgba(0,0,0,.55); text-shadow: 0 0 40px var(--accent); pointer-events: none; }
-  .tag { font-size: 11px; border: 1px solid var(--accent2); color: var(--accent2); padding: 1px 5px; margin-left: 6px; }
+  #toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 40; max-width: 92vw; display: none;
+           padding: 10px 16px; border: 1px solid var(--accent); background: var(--bg1); box-shadow: 0 0 18px rgba(0,0,0,.6); font-weight: bold; }
+  #toast.err { border-color: var(--rosso); color: var(--rosso); }
+  #modale { display: none; position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,.7); overflow: auto; padding: 14px; }
+  #modale .card { max-width: 720px; margin: 20px auto; }
+  .tag { font-size: .75em; border: 1px solid var(--accent2); color: var(--accent2); padding: 1px 5px; margin-left: 6px; }
+  .badge { background: var(--accent2); color: var(--bg1); border-radius: 9px; padding: 0 6px; font-size: .8em; margin-left: 4px; }
   .nascosto { display: none !important; }
+  .blocco { border: 1px dashed rgba(255,255,255,.25); padding: 10px; margin: 10px 0; }
 </style>
 </head>
-<body data-tema="verde">
+<body data-tema="verde" data-scala="1">
+<div id="top">
 <header>
-  <h1>&gt; FANTAMUSICA // ASTA LIVE_</h1>
+  <h1>&gt; FANTABANDA_</h1>
   <span id="chi" class="dim"></span>
+  <span id="stato" class="dim"></span>
+  <button class="n picc nascosto" id="btnRich">Richieste</button>
   <span class="temi">
     <button style="background:#40ff80" data-t="verde" title="Verde"></button><button style="background:#33bfff" data-t="blu" title="Blu"></button><button style="background:#ff8c1f" data-t="arancio" title="Arancio"></button>
   </span>
-  <button class="n nascosto" id="esci">Esci</button>
+  <button class="n picc nascosto" id="esci">Esci</button>
 </header>
+<nav id="nav" class="nascosto"></nav>
 <div id="banner"></div>
+</div>
 <div id="conto"></div>
+<div id="toast"></div>
+<div id="modale"></div>
 
 <div id="login" class="card">
   <h2>Accesso</h2>
@@ -67,47 +107,52 @@
   <div class="esito err" id="loginerr"></div>
 </div>
 
-<main id="app" class="griglia nascosto">
-  <section>
-    <div class="card">
-      <h2>In asta</h2>
-      <div class="grande" id="musicista">Nessuna asta aperta</div>
-      <div id="miglior" class="dim" style="margin-top:6px"></div>
-      <div id="miei" class="dim" style="margin-top:6px"></div>
-      <div id="controlli" class="nascosto">
-        <div class="riga" id="rapidi"></div>
-        <div class="riga"><input id="importo" type="number" inputmode="numeric" min="1" placeholder="Importo"><button class="n" id="rilancia">Rilancia</button></div>
-      </div>
-      <div class="esito" id="esito"></div>
-    </div>
-    <div class="card" style="margin-top:14px"><h2>Offerte</h2><ul class="lista" id="offerte"></ul></div>
-  </section>
-  <section>
-    <div class="card"><h2>Canale dell'asta</h2><div class="lista" id="messaggi"></div></div>
-    <div class="card" style="margin-top:14px"><h2>Squadre <span class="dim" id="nonline"></span></h2><ul class="lista" id="squadre" style="max-height:none"></ul></div>
-  </section>
-  <section class="card"><h2>Musicisti disponibili</h2><ul class="lista" id="liberi"></ul></section>
-  <section class="card"><h2>Musicisti assegnati</h2><ul class="lista" id="assegnati"></ul></section>
-</main>
+<main id="app" class="nascosto"></main>
 
 <script>
+"use strict";
 const SUPABASE_URL = "https://dyzvtfprezdhfnxiwlez.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR5enZ0ZnByZXpkaGZueGl3bGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5NjMyNTEsImV4cCI6MjEwODUzOTI1MX0.8msl-_xHx6pHerPA4oWsI15cQgCVnvwPv5cY8pzJwHU";
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ---------------------------------------------------------------------------------------------
+// Utilita'
+// ---------------------------------------------------------------------------------------------
 const $ = s => document.querySelector(s);
-function el(tag, cls, testo) { const e = document.createElement(tag); if (cls) e.className = cls; if (testo !== undefined) e.textContent = testo; return e; }
+function h(tag, a, ...kids) {
+  const e = document.createElement(tag);
+  if (a) for (const [k, v] of Object.entries(a)) {
+    if (k === "class") e.className = v;
+    else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e[k] = v;
+    else if (v === true) e.setAttribute(k, "");
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const c of kids.flat(Infinity)) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return e;
+}
+const fmt = v => (v === null || v === undefined || v === "") ? "-" : String(v);
+const sgn = v => (v > 0 ? "+" : "") + v;
+const pct = (p, t) => t > 0 ? (100 * p / t).toFixed(1) + "%" : "n/d";
+const ls = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
+async function chiama(metodo, percorso, corpo) {
+  const r = await fetch(SUPABASE_URL + percorso, {
+    method: metodo, headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + SUPABASE_KEY, "Content-Type": "application/json" },
+    body: corpo === undefined ? undefined : JSON.stringify(corpo) });
+  if (!r.ok) { let m = "errore " + r.status; try { m = (await r.json()).message || m; } catch (e) {} throw new Error(m); }
+  return r.json();
+}
+const rpc = (nome, par) => chiama("POST", "/rest/v1/rpc/" + nome, par || {});
+const leggiTab = q => chiama("GET", "/rest/v1/" + q);
 
-let io = null;          // {codice, nome, ruolo}
-let stato = { corr: null, squadre: [], musicisti: [] };
-let ultimoMsg = null, bannerT = null, contoT = null, occupato = false, canale = null, timers = [];
-
-// ---------- tema ----------
-function tema(t) { document.body.dataset.tema = t; try { localStorage.setItem("fm_tema", t); } catch (e) {} }
-document.querySelectorAll(".temi button").forEach(b => b.onclick = () => tema(b.dataset.t));
-try { tema(localStorage.getItem("fm_tema") || "verde"); } catch (e) {}
-
-// ---------- suono ----------
+let toastT = null;
+function toast(testo, err) {
+  const t = $("#toast"); t.textContent = testo; t.className = err ? "err" : ""; t.style.display = "block";
+  clearTimeout(toastT); toastT = setTimeout(() => t.style.display = "none", err ? 7000 : 4500);
+}
 function beep(freq, ms) {
   try {
     const c = beep.c || (beep.c = new (window.AudioContext || window.webkitAudioContext)());
@@ -117,170 +162,760 @@ function beep(freq, ms) {
     o.start(); o.stop(c.currentTime + ms / 1000);
   } catch (e) {}
 }
+function tema(t) { document.body.dataset.tema = t; ls.set("fm_tema", t); }
+document.querySelectorAll(".temi button").forEach(b => b.onclick = () => tema(b.dataset.t));
+tema(ls.get("fm_tema", "verde"));
+document.body.dataset.scala = ls.get("fm_scala", "1");
 
-// ---------- accesso ----------
+// ---------------------------------------------------------------------------------------------
+// Dati e regole (copia in JavaScript delle funzioni di sola lettura di fantamusica.py)
+// ---------------------------------------------------------------------------------------------
+let io = null;                       // {codice, nome, ruolo}
+let S = { dati: null, prefs: {}, richieste: [], versione: null, vuoto: false };
+let D = null, MUS = new Map();
+const SINGOLARI = { minuti: "minuto", ore: "ora", giorni: "giorno", secondi: "secondo", settimane: "settimana", mesi: "mese", anni: "anno" };
+
+function indicizza() {
+  D = S.dati;
+  MUS = new Map(D.musicisti.map(m => [m.id, m]));
+}
+const U = nome => D.utenti.find(u => u.nome.toLowerCase() === String(nome).toLowerCase());
+const giocatori = () => D.utenti.filter(u => u.gioca);
+const rosa = nome => D.musicisti.filter(m => m.proprietario === nome);
+const speso = nome => rosa(nome).reduce((s, m) => s + m.prezzo, 0);
+const crediti = nome => { const u = U(nome); return D.impostazioni.budget_iniziale - speso(nome) + (u ? (u.saldo || 0) : 0); };
+const eventiOk = () => D.eventi.filter(e => (e.stato || "ok") === "ok");
+const eventiPending = () => D.eventi.filter(e => e.stato === "pending");
+const puntiMus = (mid, prop) => eventiOk().filter(e => e.musicista_id === mid && (prop === undefined || e.proprietario === prop)).reduce((s, e) => s + e.punti, 0);
+const puntiUt = nome => eventiOk().filter(e => e.proprietario === nome).reduce((s, e) => s + e.punti, 0);
+const nomeMus = mid => { const m = MUS.get(mid); return m ? m.nome : "?"; };
+const soprUt = nome => { const u = U(nome); return u && u.soprannome ? u.soprannome : ""; };
+const etichettaUt = nome => soprUt(nome) ? `${nome} (${soprUt(nome)})` : nome;
+const mioSopr = mid => ((S.prefs && S.prefs.soprannomi_musicisti) || {})[String(mid)] || "";
+const campiPer = per => (D.campi || []).filter(c => c.per === per);
+const valProfilo = (el, c) => (el.profilo || {})[String(c.id)];
+function posizioni(valori) { const p = []; valori.forEach((v, i) => p.push(i && v === valori[i - 1] ? p[p.length - 1] : i + 1)); return p; }
+function classificaGiocatori() {
+  const dati = giocatori().map(u => [u.nome, puntiUt(u.nome)]).sort((a, b) => b[1] - a[1] || a[0].toLowerCase().localeCompare(b[0].toLowerCase()));
+  const pos = posizioni(dati.map(x => x[1]));
+  return dati.map(([nome, punti], i) => ({ pos: pos[i], nome, punti }));
+}
+function classificaMusicisti() {
+  const dati = D.musicisti.map(m => [m, puntiMus(m.id)]).sort((a, b) => b[1] - a[1] || a[0].nome.toLowerCase().localeCompare(b[0].nome.toLowerCase()));
+  const pos = posizioni(dati.map(x => x[1]));
+  return dati.map(([m, punti], i) => ({ pos: pos[i], m, punti }));
+}
+function calcolaPunti(base, bonus) {
+  let tot = Math.trunc(base) + bonus.filter(b => b.tipo === "punti").reduce((s, b) => s + Math.trunc(b.valore), 0);
+  const perc = bonus.filter(b => b.tipo === "percentuale").reduce((s, b) => s + Number(b.valore), 0);
+  return tot + Math.floor(tot * perc / 100 + 1e-9);
+}
+const slotAzione = a => [{ ruolo: a.ruolo || "", punti: a.punti, min: a.min, max: a.max }].concat((a.extra || []).map(x => Object.assign({}, x)));
+function descriviSlot(a, s) {
+  if (a.modalita === "sondaggio") return `sondaggio ${s.min}-${s.max}`;
+  if (a.modalita === "tempo") return `${sgn(s.punti)} per ${SINGOLARI[a.unita] || a.unita}`;
+  return sgn(s.punti);
+}
+function descriviPunteggio(a) {
+  const sl = slotAzione(a);
+  return sl.length === 1 ? descriviSlot(a, sl[0]) : sl.map(s => `${s.ruolo}: ${descriviSlot(a, s)}`).join(" | ");
+}
+const descriviBonus = b => `${b.nome} (${sgn(b.valore)}${b.tipo === "percentuale" ? "%" : ""})`;
+function descriviCalcolo(e) {
+  const p = [];
+  if (e.dittatura) p.push("DITTATURA"); else if (e.dettaglio) p.push(e.dettaglio);
+  if ((e.bonus || []).length && !e.dittatura) { if (e.base !== null && e.base !== undefined) p.push("base " + e.base); e.bonus.forEach(b => p.push(descriviBonus(b))); }
+  if (e.ruolo) p.push("ruolo " + e.ruolo);
+  if (e.gruppo) p.push("gruppo " + e.gruppo);
+  return p.join("; ");
+}
+const dataEv = e => e.data_completamento || e.data;
+function eventiRecenti(n, filtro) {
+  const ev = D.eventi.filter(e => !filtro || filtro(e));
+  ev.sort((a, b) => (dataEv(a) < dataEv(b) ? 1 : dataEv(a) > dataEv(b) ? -1 : b.id - a.id));
+  return n ? ev.slice(0, n) : ev;
+}
+const scambiFatti = nome => D.scambi.filter(x => x.stato === "accettato" && (x.da === nome || x.a === nome)).length;
+function simulaScambio(p) {
+  const imp = D.impostazioni, nMax = imp.musicisti_per_squadra;
+  const da = U(p.da), a = U(p.a);
+  if (!da || !a || da === a || !da.gioca || !a.gioca) return ["Giocatori non validi per lo scambio.", null];
+  if (!p.offro.length && !p.chiedo.length) return ["Lo scambio deve coinvolgere almeno un musicista.", null];
+  for (const [ids, chi] of [[p.offro, da], [p.chiedo, a]]) for (const i of ids) {
+    const m = MUS.get(i);
+    if (!m || m.proprietario !== chi.nome) return [`${m ? m.nome : "ID " + i} non appartiene (più) a ${chi.nome}.`, null];
+  }
+  const sMax = imp.scambi_max === undefined ? 3 : imp.scambi_max;
+  for (const chi of [da, a]) if (scambiFatti(chi.nome) >= sMax)
+    return [`${chi.nome} ha già fatto ${scambiFatti(chi.nome)} scambi su ${sMax} consentiti.`, null];
+  const valOff = p.offro.reduce((s, i) => s + MUS.get(i).prezzo, 0), valChi = p.chiedo.reduce((s, i) => s + MUS.get(i).prezzo, 0);
+  const nDa = rosa(da.nome).length - p.offro.length + p.chiedo.length, nA = rosa(a.nome).length - p.chiedo.length + p.offro.length;
+  const crDa = crediti(da.nome) + valOff - valChi - p.crediti, crA = crediti(a.nome) + valChi - valOff + p.crediti;
+  const dopo = {}; dopo[da.nome] = [nDa, crDa]; dopo[a.nome] = [nA, crA];
+  for (const [nome, [n, cr]] of Object.entries(dopo)) {
+    if (n > nMax) return [`${nome} avrebbe ${n} musicisti (massimo ${nMax}).`, dopo];
+    if (cr < 0) return [`${nome} non avrebbe crediti sufficienti (${cr}).`, dopo];
+  }
+  return [null, dopo];
+}
+function classificaCumulativa() {
+  const tot = {};
+  const agg = (nome, punti, titolo) => { const d = tot[nome] || (tot[nome] = { punti: 0, stagioni: 0, titoli: 0 }); d.punti += punti; d.stagioni++; d.titoli += titolo ? 1 : 0; };
+  (D.storico || []).forEach(st => st.classifica.forEach(r => agg(r.nome, r.punti, r.pos === 1)));
+  if (eventiOk().length) classificaGiocatori().forEach(r => agg(r.nome, r.punti, false));
+  const righe = Object.entries(tot).sort((a, b) => b[1].punti - a[1].punti || a[0].toLowerCase().localeCompare(b[0].toLowerCase()));
+  const pos = posizioni(righe.map(x => x[1].punti));
+  return righe.map(([nome, d], i) => ({ pos: pos[i], nome, d }));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tabelle ordinabili
+// ---------------------------------------------------------------------------------------------
+const ordini = {};
+function ordina(righe, col, desc) {
+  const f = col.ord || col.v, pieni = [], vuoti = [];
+  righe.forEach(r => { let k = f(r); if (typeof k === "string") k = k.toLowerCase(); (k === null || k === undefined ? vuoti : pieni).push([k, r]); });
+  pieni.sort((a, b) => (typeof a[0] === "string" || typeof b[0] === "string") ? String(a[0]).localeCompare(String(b[0])) : a[0] - b[0]);
+  if (desc) pieni.reverse();
+  return pieni.concat(vuoti).map(x => x[1]);
+}
+function tabella(id, cols, righe, def, opz) {
+  opz = opz || {};
+  const o = ordini[id] || (ordini[id] = { k: def[0], desc: def[1] });
+  const col = cols.find(c => c.k === o.k && c.sort !== false) || cols.find(c => c.sort !== false);
+  const ordinate = ordina(righe, col, o.desc);
+  const th = cols.map(c => h("th", {
+    class: (c.a === "r" ? "r " : "") + (c.sort === false ? "" : "ord"),
+    onclick: c.sort === false ? null : () => { ordini[id] = { k: c.k, desc: o.k === c.k ? !o.desc : (c.a === "r") }; (opz.rid || render)(); },
+    text: c.t + (c.k === col.k && c.sort !== false ? (o.desc ? " ▼" : " ▲") : "") }));
+  const tr = ordinate.map(r => {
+    const riga = h("tr", { class: (opz.io && opz.io(r) ? "io " : "") + (opz.clic ? "cl" : ""), onclick: opz.clic ? () => opz.clic(r) : null },
+      cols.map(c => { const v = c.v(r); const x = c.f ? c.f(v, r) : fmt(v); return h("td", { class: c.a === "r" ? "r" : "" }, x); }));
+    return riga;
+  });
+  if (!tr.length) return h("p", { class: "dim", text: opz.vuoto || "Nessun dato." });
+  return h("div", { class: "tab-wrap" }, h("table", null, h("thead", null, h("tr", null, th)), h("tbody", null, tr)));
+}
+const av = nome => h("span", { class: "av", text: String(nome).split(/\s+/).map(p => p[0]).slice(0, 2).join("").toUpperCase() });
+const linkUt = nome => h("a", { href: "#", style: "color:inherit", onclick: ev => { ev.preventDefault(); apri("squadra", null, nome); } }, h("span", { class: "nome" }, av(nome), etichettaUt(nome)));
+function cellaMus(m) {
+  const extra = [m.soprannome ? m.soprannome : null, mioSopr(m.id) ? "tu: " + mioSopr(m.id) : null].filter(Boolean).join(", ");
+  return h("span", { class: "nome" }, av(m.nome), h("span", null, m.nome, extra ? h("span", { class: "dim", text: " (" + extra + ")" }) : null));
+}
+const puntiTxt = (e) => e.stato === "pending" ? h("span", { class: "pend", text: e.da_approvare && e.proposta_base !== null && e.proposta_base !== undefined ? "DA CONFERMARE" : "PENDING" })
+  : h("span", { class: e.punti < 0 ? "neg" : "" , text: sgn(e.punti) + (e.dittatura ? "*" : "") });
+
+// ---------------------------------------------------------------------------------------------
+// Navigazione
+// ---------------------------------------------------------------------------------------------
+const TABS = [["classifica", "Classifica"], ["squadra", "Squadra"], ["eventi", "Eventi"], ["mercato", "Mercato"], ["asta", "Asta"],
+              ["stat", "Statistiche"], ["storico", "Storico"], ["impost", "Impostazioni"]];
+let vista = { tab: ls.get("fm_tab", "classifica"), sub: null, arg: null };
+let sporco = false;                  // un modulo in compilazione: non ridisegnare la pagina sotto le dita
+function apri(tab, sub, arg) { vista = { tab, sub: sub || null, arg: arg || null }; sporco = false; ls.set("fm_tab", tab); render(); window.scrollTo(0, 0); }
+function sottoMenu(voci, corrente, f) {
+  return h("div", { class: "sub" }, voci.map(([k, t]) => h("button", { class: "n picc" + (k === corrente ? " on" : ""), onclick: () => { vista.sub = k; sporco = false; render(); }, text: t })));
+}
+function disegnaNav() {
+  const nav = $("#nav"); nav.innerHTML = "";
+  TABS.forEach(([k, t]) => nav.append(h("button", { class: "n picc" + (vista.tab === k ? " on" : ""), onclick: () => apri(k), text: t },
+    k === "eventi" && D && eventiPending().length ? h("span", { class: "badge", text: eventiPending().length }) : null,
+    k === "mercato" && D && io ? (n => n ? h("span", { class: "badge", text: n }) : null)(D.scambi.filter(x => x.stato === "proposto" && x.a === io.nome).length) : null)));
+}
+function render() {
+  const app = $("#app");
+  disegnaNav();
+  if (S.vuoto || !D) {
+    app.innerHTML = ""; app.append(h("div", { class: "card" }, h("h2", { text: "In attesa dell'admin" }),
+      h("p", null, "Il gioco non è ancora stato pubblicato. L'admin deve aprire la sua app: appena parte, i dati compaiono qui da soli.")));
+    return;
+  }
+  const f = VISTE[vista.tab] || VISTE.classifica;
+  const nodo = h("div");
+  try { f(nodo); } catch (e) { nodo.append(h("div", { class: "card esito err", text: "Errore nella pagina: " + e.message })); console.error(e); }
+  if (vista.tab !== "asta") { app.innerHTML = ""; app.append(nodo); }
+  else if (!app.querySelector("#as-root")) { app.innerHTML = ""; app.append(nodo); }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Viste
+// ---------------------------------------------------------------------------------------------
+const VISTE = {};
+
+VISTE.classifica = function (box) {
+  vista.sub = vista.sub || "giocatori";
+  box.append(sottoMenu([["giocatori", "Giocatori"], ["musicisti", "Musicisti"]], vista.sub));
+  if (vista.sub === "giocatori") {
+    const cl = classificaGiocatori();
+    if (!cl.length) return box.append(h("p", { text: "Nessun giocatore." }));
+    const tot = cl.reduce((s, r) => s + r.punti, 0), capo = cl[0].punti, nMax = D.impostazioni.musicisti_per_squadra;
+    box.append(h("div", { class: "card" }, h("h2", { text: "Classifica giocatori - " + D.impostazioni.stagione }),
+      tabella("cl_g", [
+        { k: "pos", t: "Pos", v: r => r.pos, a: "r", f: v => h("span", { class: "pos", text: v }) },
+        { k: "nome", t: "Giocatore", v: r => r.nome, f: (v) => linkUt(v) },
+        { k: "punti", t: "Punti", v: r => r.punti, a: "r" },
+        { k: "dist", t: "Distacco", v: r => r.punti - capo, a: "r", sort: false, f: v => v === 0 ? "-" : v },
+        { k: "perc", t: "% punti", v: r => r.punti, a: "r", sort: false, f: v => pct(v, tot) },
+        { k: "rosa", t: "Rosa", v: r => rosa(r.nome).length, a: "r", f: v => `${v}/${nMax}` },
+        { k: "cr", t: "Crediti", v: r => crediti(r.nome), a: "r" },
+        { k: "mus", t: "Musicisti", v: r => rosa(r.nome).map(m => m.nome).join(", ") || null, sort: false },
+      ], cl, ["pos", false], { io: r => io && r.nome === io.nome })));
+  } else {
+    const cl = classificaMusicisti(), tot = eventiOk().reduce((s, e) => s + e.punti, 0);
+    if (!cl.length) return box.append(h("p", { text: "Nessun musicista." }));
+    const cols = [
+      { k: "pos", t: "Pos", v: r => r.pos, a: "r", f: v => h("span", { class: "pos", text: v }) },
+      { k: "nome", t: "Musicista", v: r => r.m.nome, f: (v, r) => cellaMus(r.m) },
+      { k: "sq", t: "Squadra", v: r => r.m.proprietario, f: v => v ? linkUt(v) : "-" },
+      { k: "prezzo", t: "Prezzo", v: r => r.m.proprietario ? r.m.prezzo : null, a: "r" },
+      { k: "punti", t: "Punti", v: r => r.punti, a: "r" },
+      { k: "perc", t: "% punti", v: r => r.punti, a: "r", sort: false, f: v => pct(v, tot) },
+    ].concat(campiPer("musicisti").map(c => ({ k: "c" + c.id, t: c.nome, v: r => valProfilo(r.m, c) === undefined ? null : valProfilo(r.m, c), a: c.tipo === "numero" ? "r" : "l" })));
+    box.append(h("div", { class: "card" }, h("h2", { text: "Classifica musicisti" }),
+      h("p", { class: "dim", text: "Tocca un musicista per il suo profilo." }),
+      tabella("cl_m", cols, cl, ["pos", false], { clic: r => modaleMusicista(r.m.id) })));
+  }
+};
+
+function modaleMusicista(mid) {
+  const m = MUS.get(mid); if (!m) return;
+  const ev = eventiRecenti(0, e => e.musicista_id === mid);
+  const campi = campiPer("musicisti");
+  apriModale(h("div", { class: "card" },
+    h("h2", { text: m.nome }),
+    m.soprannome ? h("p", { class: "dim", text: "Soprannome: " + m.soprannome }) : null,
+    h("p", null, "Squadra: ", m.proprietario ? `${m.proprietario} (prezzo ${m.prezzo})` : "nessuna", " - Punti: ", h("b", { text: puntiMus(mid) })),
+    campi.length ? h("div", null, campi.map(c => h("div", { text: `${c.nome}: ${fmt(valProfilo(m, c))}` }))) : null,
+    h("h3", { text: "Eventi" }),
+    tabella("ev_m", colonneEventi(), ev, ["data", true], { vuoto: "Nessun evento.", rid: () => modaleMusicista(mid) }),
+    h("div", { class: "riga" }, h("button", { class: "n", onclick: chiudiModale, text: "Chiudi" }))));
+}
+function apriModale(nodo) { const m = $("#modale"); m.innerHTML = ""; m.append(nodo); m.style.display = "block"; }
+function chiudiModale() { $("#modale").style.display = "none"; $("#modale").innerHTML = ""; }
+
+VISTE.squadra = function (box) {
+  const gio = giocatori();
+  let nome = vista.arg || (io.ruolo === "giocatore" && U(io.nome) && U(io.nome).gioca ? io.nome : (gio[0] && gio[0].nome));
+  if (!nome) return box.append(h("p", { text: "Nessun giocatore." }));
+  const sel = h("select", { onchange: ev => { vista.arg = ev.target.value; render(); } }, gio.map(u => h("option", { value: u.nome, selected: u.nome === nome, text: etichettaUt(u.nome) })));
+  const s = D.impostazioni, r = rosa(nome), tot = puntiUt(nome), sp = speso(nome);
+  const righe = r.map(m => ({ m, p: puntiMus(m.id, nome) }));
+  const ex = tot - righe.reduce((a, x) => a + x.p, 0);
+  const cl = classificaGiocatori().find(x => x.nome === nome);
+  box.append(h("div", { class: "card" }, h("h2", { text: "Squadra" }), sel,
+    h("p", null, `Crediti residui ${crediti(nome)}/${s.budget_iniziale} - musicisti ${r.length}/${s.musicisti_per_squadra}`),
+    righe.length ? tabella("sq", [
+      { k: "nome", t: "Musicista", v: x => x.m.nome, f: (v, x) => cellaMus(x.m) },
+      { k: "prezzo", t: "Prezzo", v: x => x.m.prezzo, a: "r" },
+      { k: "spesa", t: "% spesa", v: x => x.m.prezzo, a: "r", sort: false, f: v => pct(v, sp) },
+      { k: "punti", t: "Punti", v: x => x.p, a: "r" },
+      { k: "perc", t: "% punti squadra", v: x => x.p, a: "r", sort: false, f: v => pct(v, tot) },
+      { k: "resa", t: "Punti/credito", v: x => x.m.prezzo ? x.p / x.m.prezzo : null, a: "r", f: v => v === null ? "-" : v.toFixed(2) },
+    ], righe, ["punti", true], { clic: x => modaleMusicista(x.m.id) }) : h("p", { text: "Nessun musicista in squadra." }),
+    ex ? h("p", { class: "dim", text: `Punti maturati da musicisti non più in squadra: ${sgn(ex)}` }) : null,
+    h("p", null, h("b", { text: `Totale squadra: ${sgn(tot)} punti` }), cl ? ` - posizione in classifica: ${cl.pos}°` : "")));
+  const ev = eventiRecenti(0, e => e.proprietario === nome);
+  box.append(h("div", { class: "card" }, h("h2", { text: "Eventi della squadra" }), tabella("ev_sq", colonneEventi(), ev, ["data", true], { vuoto: "Nessun evento." })));
+};
+
+function colonneEventi() {
+  return [
+    { k: "id", t: "ID", v: e => e.id, a: "r" },
+    { k: "data", t: "Data", v: e => dataEv(e) },
+    { k: "mus", t: "Musicista", v: e => nomeMus(e.musicista_id) },
+    { k: "azione", t: "Azione", v: e => e.azione },
+    { k: "punti", t: "Punti", v: e => e.punti, a: "r", f: (v, e) => puntiTxt(e), ord: e => e.stato === "pending" ? null : e.punti },
+    { k: "sq", t: "Squadra", v: e => e.proprietario },
+    { k: "calc", t: "Calcolo", v: e => descriviCalcolo(e) + (e.proposto_da ? (descriviCalcolo(e) ? "; " : "") + "proposto da " + e.proposto_da : ""), sort: false },
+  ];
+}
+
+VISTE.eventi = function (box) {
+  vista.sub = vista.sub || "ultimi";
+  const np = eventiPending().length;
+  box.append(sottoMenu([["ultimi", "Ultimi eventi"], ["pending", "Pending (" + np + ")"], ["proponi", "Proponi un evento"]], vista.sub));
+  if (vista.sub === "ultimi") {
+    const n = parseInt(ls.get("fm_righe", "15"), 10);
+    const sel = h("select", { onchange: ev => { ls.set("fm_righe", ev.target.value); render(); } },
+      [["15", "ultimi 15"], ["30", "ultimi 30"], ["60", "ultimi 60"], ["0", "tutti"]].map(([v, t]) => h("option", { value: v, selected: Number(v) === n, text: t })));
+    box.append(h("div", { class: "card" }, h("h2", { text: "Eventi" }), sel,
+      tabella("ev", colonneEventi(), eventiRecenti(n), ["data", true], { vuoto: "Nessun evento registrato." })));
+  } else if (vista.sub === "pending") vistaPending(box);
+  else vistaProponi(box);
+};
+
+function vistaPending(box) {
+  const pend = eventiPending();
+  const c = h("div", { class: "card" }, h("h2", { text: "Eventi in pending" }),
+    h("p", { class: "dim", text: "Il punteggio si decide dopo il sondaggio, oppure l'admin deve ancora confermare la proposta." }));
+  if (!pend.length) c.append(h("p", { text: "Nessun evento in pending." }));
+  pend.sort((a, b) => b.id - a.id).forEach(e => {
+    const az = D.azioni.find(a => a.id === e.azione_id);
+    const sond = az && az.modalita === "sondaggio";
+    const [lo, hi] = e.fascia || (az ? [az.min, az.max] : [1, 10]);
+    const gia = (e.votanti || []).includes(io.nome);
+    const blocco = h("div", { class: "blocco" },
+      h("div", null, h("b", { text: `#${e.id} ${nomeMus(e.musicista_id)} - ${e.azione}` }), h("span", { class: "tag", text: e.da_approvare && e.proposta_base != null ? "DA CONFERMARE" : "PENDING" })),
+      h("div", { class: "dim", text: `${e.data}${e.proposto_da ? " | proposto da " + e.proposto_da : ""} | squadra: ${fmt(e.proprietario)}` }));
+    if (e.proposta_base != null) blocco.append(h("div", null, `Punteggio proposto: ${sgn(calcolaPunti(e.proposta_base, e.bonus || []))}`, e.dettaglio ? ` (${e.dettaglio})` : ""));
+    if (sond) {
+      const voti = e.voti || [];
+      blocco.append(h("div", null, `Voti: ${voti.join(", ") || "nessuno"}`, voti.length ? ` (media ${mediaVoti(voti)})` : ""));
+      if (io.ruolo === "giocatore" && !gia) {
+        const inp = h("input", { type: "number", min: lo, max: hi, placeholder: `il tuo voto (${lo}-${hi})`, inputmode: "numeric" });
+        blocco.append(h("div", { class: "riga" }, inp, h("button", { class: "n auto", text: "Vota", onclick: () => {
+          const v = parseInt(inp.value, 10);
+          if (isNaN(v) || v < lo || v > hi) return toast(`Il voto va da ${lo} a ${hi}`, true);
+          invia("voto", { evento_id: e.id, voto: v });
+        } })));
+      } else if (gia) blocco.append(h("div", { class: "dim", text: "Hai già votato." }));
+    }
+    c.append(blocco);
+  });
+  box.append(c);
+}
+const mediaVoti = voti => { const t = voti.reduce((a, b) => a + b, 0), m = Math.floor(t / voti.length); return m === 0 && t > 0 ? 1 : m; };
+
+function vistaProponi(box) {
+  if (io.ruolo !== "giocatore") return box.append(h("div", { class: "card" }, h("p", { text: "L'admin registra gli eventi dall'app." })));
+  if (!D.azioni.length || !D.musicisti.length) return box.append(h("div", { class: "card" }, h("p", { text: "Servono almeno un'azione e un musicista." })));
+  const opzMus = D.musicisti.slice().sort((a, b) => a.nome.localeCompare(b.nome)).map(m => ({ id: m.id, t: `${m.nome} (${m.proprietario || "libero"})` }));
+  const selMus = (sel) => h("select", { oninput: () => sporco = true }, opzMus.map(o => h("option", { value: o.id, text: o.t, selected: o.id === sel })));
+  const selAz = h("select", { oninput: () => { sporco = true; disegna(); } }, D.azioni.map(a => h("option", { value: a.id, text: `${a.nome} (${descriviPunteggio(a)})` })));
+  const dyn = h("div"), esito = h("div", { class: "esito" });
+  let st = null;
+  function anteprima() {
+    if (!st) return;
+    const a = st.a;
+    if (a.modalita === "sondaggio") { st.prev.textContent = "Il punteggio dipenderà dal sondaggio: l'evento resta in pending."; return; }
+    const bonus = st.bonus.filter(([cb]) => cb.checked).map(([, b]) => b);
+    const q = a.modalita === "tempo" ? parseFloat(String(st.qta.value).replace(",", ".")) : null;
+    if (a.modalita === "tempo" && !(q > 0)) { st.prev.textContent = "Scrivi la quantità per vedere il punteggio."; return; }
+    const righe = st.sel.map((s, i) => {
+      const slot = st.slot[i], base = a.modalita === "tempo" ? Math.floor(q * slot.punti + 0.5) : slot.punti;
+      return `${s.options[s.selectedIndex].text.split(" (")[0]}: ${sgn(calcolaPunti(base, bonus))}`;
+    });
+    st.altri.forEach(([s, p]) => { const v = parseInt(p.value, 10); if (!isNaN(v)) righe.push(`${s.options[s.selectedIndex].text.split(" (")[0]}: ${sgn(calcolaPunti(v, bonus))}`); });
+    st.prev.textContent = "Punteggio proposto - " + righe.join(" | ");
+  }
+  function disegna() {
+    dyn.innerHTML = "";
+    const a = D.azioni.find(x => x.id === parseInt(selAz.value, 10));
+    const slot = slotAzione(a);
+    st = { a, slot, sel: [], voto: [], altri: [], bonus: [], qta: null, prev: h("div", { class: "dim", style: "margin-top:8px" }) };
+    slot.forEach((s, i) => {
+      const sm = selMus(); sm.addEventListener("input", anteprima); st.sel.push(sm);
+      dyn.append(h("h3", { text: slot.length > 1 ? `Musicista «${s.ruolo}» (${descriviSlot(a, s)})` : `Musicista (${descriviSlot(a, s)})` }), sm);
+      if (a.modalita === "sondaggio") {
+        const v = h("input", { type: "number", min: s.min, max: s.max, inputmode: "numeric", placeholder: `il tuo voto ${s.min}-${s.max} (facoltativo)`, oninput: () => sporco = true });
+        st.voto.push(v); dyn.append(v);
+      }
+    });
+    if (a.modalita === "tempo") {
+      st.qta = h("input", { placeholder: `Quantità in ${a.unita} (es. 90 oppure 1,5)`, inputmode: "decimal", oninput: () => { sporco = true; anteprima(); } });
+      dyn.append(h("h3", { text: "Quantità" }), st.qta);
+    }
+    const bl = h("div");
+    dyn.append(h("h3", { text: "Altri musicisti coinvolti (facoltativo)" }), bl,
+      h("button", { class: "n picc", text: "+ aggiungi musicista", onclick: () => {
+        const sm = selMus(), p = h("input", { type: "number", placeholder: "punti (anche negativi)", inputmode: "numeric", oninput: () => { sporco = true; anteprima(); } });
+        sm.addEventListener("input", anteprima); st.altri.push([sm, p]); bl.append(h("div", { class: "riga" }, sm, p));
+      } }));
+    const bonus = (a.bonus_ids || []).map(i => D.bonus.find(b => b.id === i)).filter(Boolean);
+    if (bonus.length) {
+      dyn.append(h("h3", { text: "Bonus/malus da applicare" }));
+      bonus.forEach(b => { const cb = h("input", { type: "checkbox", onchange: () => { sporco = true; anteprima(); } }); st.bonus.push([cb, b]); dyn.append(h("label", { class: "chk" }, cb, descriviBonus(b))); });
+    }
+    st.nota = h("textarea", { placeholder: "Nota (facoltativa)", oninput: () => sporco = true });
+    dyn.append(h("h3", { text: "Nota" }), st.nota, st.prev);
+    anteprima();
+  }
+  disegna();
+  const invio = h("button", { class: "n", text: "Proponi l'evento", onclick: async () => {
+    const a = st.a;
+    const payload = { azione_id: a.id, nota: st.nota.value.trim(),
+      musicisti: st.sel.map((s, i) => ({ musicista_id: parseInt(s.value, 10), voto: st.voto[i] ? st.voto[i].value.trim() : "" })),
+      bonus_ids: st.bonus.filter(([cb]) => cb.checked).map(([, b]) => b.id),
+      altri: st.altri.filter(([, p]) => p.value.trim() !== "").map(([s, p]) => ({ musicista_id: parseInt(s.value, 10), punti: parseInt(p.value, 10) })) };
+    if (a.modalita === "tempo") payload.quantita = st.qta.value.trim();
+    if (await invia("evento", payload, esito)) { sporco = false; vista.sub = "pending"; render(); }
+  } });
+  box.append(h("div", { class: "card" }, h("h2", { text: "Proponi un evento" }),
+    h("p", { class: "dim", text: "Scegli l'azione e i musicisti. L'evento va in pending finché l'admin non lo conferma. Nei sondaggi puoi mettere il tuo voto." }),
+    selAz, dyn, h("div", { class: "riga" }, invio), esito));
+}
+
+// ----- richieste ai server (applicate dall'app dell'admin) -----
+const noteRich = new Map();
+async function invia(tipo, payload, esitoEl) {
+  const mostra = (t, err) => { if (esitoEl) { esitoEl.className = "esito " + (err ? "err" : "ok"); esitoEl.textContent = t; } toast(t, err); };
+  try {
+    const r = await rpc("fm_invia", { p_codice: io.codice, p_tipo: tipo, p_payload: payload });
+    if (!r.ok) { mostra(r.errore, true); return false; }
+    noteRich.set(r.id, "nuova");
+    toast("Richiesta inviata: l'admin la applica a breve...");
+    beep(660, 70);
+    carica();
+    return true;
+  } catch (e) { mostra("Errore di connessione: " + e.message, true); return false; }
+}
+function notificaRichieste() {
+  (S.richieste || []).forEach(r => {
+    const prima = noteRich.get(r.id);
+    if (prima === "nuova" && r.stato !== "nuova") toast(r.messaggio || (r.stato === "ok" ? "Fatto." : "Richiesta respinta."), r.stato === "errore");
+    noteRich.set(r.id, r.stato);
+  });
+  const n = (S.richieste || []).filter(r => r.stato === "nuova").length;
+  $("#btnRich").textContent = "Richieste" + (n ? ` (${n} in attesa)` : "");
+}
+$("#btnRich").onclick = () => {
+  const r = S.richieste || [];
+  const nomi = { evento: "Evento proposto", scambio_proponi: "Proposta di scambio", scambio_rispondi: "Risposta a uno scambio", pref_soprannome: "Soprannome", pref_sopr_musicista: "Soprannome musicista", voto: "Voto" };
+  apriModale(h("div", { class: "card" }, h("h2", { text: "Le mie richieste" }),
+    r.length ? h("ul", { class: "lista", style: "max-height:none" }, r.map(x => h("li", null, h("span", null, `${nomi[x.tipo] || x.tipo}`, h("div", { class: "dim", text: x.messaggio || "" })),
+      h("span", { class: x.stato === "errore" ? "neg" : x.stato === "ok" ? "" : "pend", text: x.stato === "nuova" ? "IN ATTESA" : x.stato === "ok" ? "FATTO" : "RESPINTA" })))) : h("p", { text: "Nessuna richiesta." }),
+    h("div", { class: "riga" }, h("button", { class: "n", onclick: chiudiModale, text: "Chiudi" }))));
+};
+
+// ----- mercato -----
+VISTE.mercato = function (box) {
+  vista.sub = vista.sub || "sospeso";
+  const imp = D.impostazioni, fatti = io.ruolo === "giocatore" ? scambiFatti(io.nome) : 0, max = imp.scambi_max === undefined ? 3 : imp.scambi_max;
+  box.append(h("div", { class: "card" }, h("h2", { text: "Mercato e scambi" }),
+    h("p", null, `Mercato ${imp.mercato_aperto === false ? "CHIUSO" : "APERTO"}`, io.ruolo === "giocatore" ? ` - i tuoi scambi: ${fatti}/${max}` : "")));
+  box.append(sottoMenu([["sospeso", "Proposte in sospeso"], ["nuova", "Nuova proposta"], ["storico", "Storico"]], vista.sub));
+  if (vista.sub === "nuova") return vistaNuovaProposta(box);
+  const colScambi = [
+    { k: "id", t: "ID", v: p => p.id, a: "r" },
+    { k: "data", t: "Data", v: p => p.data_esito || p.data },
+    { k: "da", t: "Proponente", v: p => p.da }, { k: "a", t: "Destinatario", v: p => p.a },
+    { k: "cede", t: "Proponente cede", v: p => (p.nomi_offro || []).join(", ") || null, sort: false },
+    { k: "rec", t: "Destinatario cede", v: p => (p.nomi_chiedo || []).join(", ") || null, sort: false },
+    { k: "cr", t: "Conguaglio (paga il proponente)", v: p => p.crediti, a: "r", f: v => v ? sgn(v) : "-" },
+    { k: "stato", t: "Stato", v: p => p.stato },
+  ];
+  if (vista.sub === "storico") {
+    const chiusi = D.scambi.filter(p => p.stato !== "proposto");
+    return box.append(h("div", { class: "card" }, h("h2", { text: "Storico scambi" }), tabella("scambi_st", colScambi, chiusi, ["id", true], { vuoto: "Nessuno scambio concluso." })));
+  }
+  const aperte = D.scambi.filter(p => p.stato === "proposto");
+  const c = h("div", { class: "card" }, h("h2", { text: "Proposte in sospeso" }));
+  if (!aperte.length) c.append(h("p", { text: "Nessuna proposta in sospeso." }));
+  aperte.forEach(p => {
+    const [err, dopo] = simulaScambio(p);
+    const sono_dest = io.nome === p.a, sono_prop = io.nome === p.da;
+    const b = h("div", { class: "blocco" },
+      h("div", null, h("b", { text: `#${p.id}: ${p.da} → ${p.a}` }), h("span", { class: "dim", text: "  " + p.data })),
+      h("div", null, `${p.da} cede: ${(p.nomi_offro || []).join(", ") || "nessun musicista"}`),
+      h("div", null, `${p.a} cede: ${(p.nomi_chiedo || []).join(", ") || "nessun musicista"}`),
+      h("div", { class: "dim", text: p.crediti > 0 ? `Conguaglio: ${p.da} paga ${p.crediti} crediti a ${p.a}` : p.crediti < 0 ? `Conguaglio: ${p.a} paga ${-p.crediti} crediti a ${p.da}` : "Nessun conguaglio (ogni musicista porta con sé il suo prezzo d'asta)" }),
+      dopo ? h("div", { class: "dim", text: Object.entries(dopo).map(([n, [k, cr]]) => `Dopo lo scambio ${n}: ${k} musicisti, ${cr} crediti`).join(" | ") }) : null,
+      err ? h("div", { class: "neg", text: "Non fattibile ora: " + err }) : null);
+    const r = h("div", { class: "riga" });
+    if (sono_dest) {
+      r.append(h("button", { class: "n", text: "Accetta", disabled: !!err || imp.mercato_aperto === false, onclick: () => invia("scambio_rispondi", { id: p.id, azione: "accetta" }) }));
+      r.append(h("button", { class: "n", text: "Rifiuta", onclick: () => invia("scambio_rispondi", { id: p.id, azione: "rifiuta" }) }));
+    }
+    if (sono_prop) r.append(h("button", { class: "n", text: "Annulla la proposta", onclick: () => invia("scambio_rispondi", { id: p.id, azione: "annulla" }) }));
+    if (r.children.length) b.append(r);
+    c.append(b);
+  });
+  box.append(c);
+};
+
+function vistaNuovaProposta(box) {
+  if (io.ruolo !== "giocatore" || !U(io.nome) || !U(io.nome).gioca) return box.append(h("div", { class: "card" }, h("p", { text: "Solo chi partecipa alla classifica può proporre scambi." })));
+  if (D.impostazioni.mercato_aperto === false) return box.append(h("div", { class: "card" }, h("p", { text: "Il mercato è chiuso." })));
+  const altri = giocatori().filter(u => u.nome !== io.nome);
+  if (!altri.length) return box.append(h("div", { class: "card" }, h("p", { text: "Non ci sono altri giocatori." })));
+  const dest = h("select", { oninput: () => { sporco = true; ridisegna(); } }, altri.map(u => h("option", { value: u.nome, text: etichettaUt(u.nome) })));
+  const crd = h("input", { type: "number", value: "0", inputmode: "numeric", oninput: () => { sporco = true; aggiorna(); } });
+  const mie = h("div"), loro = h("div"), prev = h("div", { class: "esito" }), esito = h("div", { class: "esito" });
+  const invio = h("button", { class: "n", text: "Invia la proposta", disabled: true });
+  let cbMie = [], cbLoro = [];
+  const selezionati = (cbs) => cbs.filter(([cb]) => cb.checked).map(([, m]) => m.id);
+  function lista(chi, cont, cbs) {
+    cont.innerHTML = "";
+    const r = rosa(chi);
+    if (!r.length) cont.append(h("p", { class: "dim", text: "Nessun musicista." }));
+    r.forEach(m => { const cb = h("input", { type: "checkbox", onchange: () => { sporco = true; aggiorna(); } }); cbs.push([cb, m]); cont.append(h("label", { class: "chk" }, cb, `${m.nome} (prezzo ${m.prezzo})`)); });
+  }
+  function ridisegna() { cbMie = []; cbLoro = []; lista(io.nome, mie, cbMie); lista(dest.value, loro, cbLoro); aggiorna(); }
+  function aggiorna() {
+    const p = { da: io.nome, a: dest.value, offro: selezionati(cbMie), chiedo: selezionati(cbLoro), crediti: parseInt(crd.value, 10) || 0 };
+    const [err, dopo] = simulaScambio(p);
+    prev.className = "esito " + (err ? "err" : "ok");
+    prev.textContent = (err ? "Non fattibile ora: " + err : "Fattibile.") + (dopo ? "  " + Object.entries(dopo).map(([n, [k, cr]]) => `Dopo: ${n} ${k} musicisti, ${cr} crediti.`).join(" ") : "");
+    invio.disabled = !!err;
+  }
+  invio.onclick = async () => {
+    const p = { a: dest.value, offro: selezionati(cbMie), chiedo: selezionati(cbLoro), crediti: parseInt(crd.value, 10) || 0 };
+    if (await invia("scambio_proponi", p, esito)) { sporco = false; vista.sub = "sospeso"; render(); }
+  };
+  ridisegna();
+  box.append(h("div", { class: "card" }, h("h2", { text: "Nuova proposta (scambio o vendita)" }),
+    h("h3", { text: "Con chi?" }), dest, h("h3", { text: "I tuoi musicisti che cedi" }), mie,
+    h("h3", { text: "I suoi musicisti che vuoi ricevere" }), loro,
+    h("h3", { text: "Conguaglio: crediti che TU paghi oltre ai prezzi (negativo = li ricevi)" }), crd,
+    prev, h("div", { class: "riga" }, invio), esito));
+}
+
+// ----- statistiche -----
+VISTE.stat = function (box) {
+  vista.sub = vista.sub || "riepilogo";
+  box.append(sottoMenu([["riepilogo", "Riepilogo"], ["azioni", "Azioni"], ["squadre", "Squadre a confronto"], ["affari", "Affari"]], vista.sub));
+  const ev = eventiOk(), s = D.impostazioni;
+  if (vista.sub === "riepilogo") {
+    const gio = giocatori(), mus = D.musicisti, venduti = mus.filter(m => m.proprietario);
+    const budgetTot = s.budget_iniziale * gio.length, spesoTot = gio.reduce((a, u) => a + speso(u.nome), 0);
+    const totP = ev.reduce((a, e) => a + e.punti, 0), pos = ev.filter(e => e.punti > 0).length, neg = ev.filter(e => e.punti < 0).length;
+    const senza = ev.filter(e => !e.proprietario).reduce((a, e) => a + e.punti, 0);
+    const righe = [["Giocatori", gio.length], ["Musicisti acquistati", `${venduti.length}/${mus.length} (${pct(venduti.length, mus.length)})`],
+      ["Crediti spesi in asta", `${spesoTot}/${budgetTot} (${pct(spesoTot, budgetTot)})`], ["Eventi registrati", `${ev.length} (in pending: ${eventiPending().length})`]];
+    if (ev.length) {
+      const ditt = ev.filter(e => e.dittatura).length, conB = ev.filter(e => (e.bonus || []).length).length;
+      const mig = ev.reduce((a, e) => e.punti > a.punti ? e : a), peg = ev.reduce((a, e) => e.punti < a.punti ? e : a);
+      righe.push(["Eventi positivi", `${pos} (${pct(pos, ev.length)})`], ["Eventi negativi", `${neg} (${pct(neg, ev.length)})`],
+        ["Con bonus/malus", `${conB} (${pct(conB, ev.length)})`], ["DITTATURA", `${ditt} (${pct(ditt, ev.length)})`],
+        ["Punti totali assegnati", `${sgn(totP)} (media ${(totP / ev.length).toFixed(1)} a evento)`],
+        ["Punti a musicisti senza squadra", `${sgn(senza)} (${pct(senza, totP)} del totale)`],
+        ["Evento migliore", `${sgn(mig.punti)} ${nomeMus(mig.musicista_id)} - ${mig.azione}`], ["Evento peggiore", `${sgn(peg.punti)} ${nomeMus(peg.musicista_id)} - ${peg.azione}`]);
+    }
+    box.append(h("div", { class: "card" }, h("h2", { text: "Riepilogo - " + s.stagione }), h("table", null, h("tbody", null, righe.map(([a, b]) => h("tr", null, h("td", { text: a }), h("td", { text: String(b) })))))));
+  } else if (vista.sub === "azioni") {
+    const agg = {}; ev.forEach(e => { const c = agg[e.azione] || (agg[e.azione] = [0, 0]); c[0]++; c[1] += e.punti; });
+    const righe = Object.entries(agg).map(([n, c]) => ({ n, v: c[0], t: c[1] }));
+    box.append(h("div", { class: "card" }, h("h2", { text: "Azioni più frequenti" }), tabella("st_az", [
+      { k: "n", t: "Azione", v: r => r.n }, { k: "v", t: "Volte", v: r => r.v, a: "r" },
+      { k: "p", t: "% eventi", v: r => r.v, a: "r", sort: false, f: v => pct(v, ev.length) },
+      { k: "t", t: "Punti tot.", v: r => r.t, a: "r", f: v => sgn(v) }, { k: "m", t: "Media", v: r => r.t / r.v, a: "r", f: v => sgn(Math.round(v * 10) / 10) },
+    ], righe, ["v", true], { vuoto: "Nessun evento registrato." })));
+  } else if (vista.sub === "squadre") {
+    const cl = classificaGiocatori(), tot = cl.reduce((a, r) => a + r.punti, 0);
+    box.append(h("div", { class: "card" }, h("h2", { text: "Squadre a confronto" }), tabella("st_sq", [
+      { k: "pos", t: "Pos", v: r => r.pos, a: "r" }, { k: "nome", t: "Giocatore", v: r => r.nome, f: v => linkUt(v) },
+      { k: "sp", t: "Speso", v: r => speso(r.nome), a: "r", f: v => `${v}/${s.budget_iniziale}` },
+      { k: "bud", t: "% budget", v: r => speso(r.nome), a: "r", sort: false, f: v => pct(v, s.budget_iniziale) },
+      { k: "p", t: "Punti", v: r => r.punti, a: "r" }, { k: "perc", t: "% punti", v: r => r.punti, a: "r", sort: false, f: v => pct(v, tot) },
+      { k: "resa", t: "Punti/credito", v: r => speso(r.nome) ? r.punti / speso(r.nome) : null, a: "r", f: v => v === null ? "-" : v.toFixed(2) },
+      { k: "med", t: "Media/musicista", v: r => rosa(r.nome).length ? r.punti / rosa(r.nome).length : null, a: "r", f: v => v === null ? "-" : v.toFixed(1) },
+    ], cl, ["pos", false])));
+  } else {
+    const righe = D.musicisti.filter(m => m.proprietario && m.prezzo > 0).map(m => ({ m, p: puntiMus(m.id, m.proprietario) }));
+    box.append(h("div", { class: "card" }, h("h2", { text: "Resa dei musicisti (punti per credito speso)" }), tabella("st_aff", [
+      { k: "n", t: "Musicista", v: r => r.m.nome, f: (v, r) => cellaMus(r.m) }, { k: "sq", t: "Squadra", v: r => r.m.proprietario },
+      { k: "pr", t: "Prezzo", v: r => r.m.prezzo, a: "r" }, { k: "p", t: "Punti", v: r => r.p, a: "r" },
+      { k: "resa", t: "Punti/credito", v: r => r.p / r.m.prezzo, a: "r", f: v => v.toFixed(2) },
+    ], righe, ["resa", true], { vuoto: "Nessun musicista acquistato." })));
+  }
+};
+
+// ----- storico -----
+VISTE.storico = function (box) {
+  vista.sub = vista.sub || "cumulativa";
+  box.append(sottoMenu([["cumulativa", "Classifica cumulativa"], ["stagioni", "Stagioni archiviate"]], vista.sub));
+  if (vista.sub === "cumulativa") {
+    const dati = classificaCumulativa(), tot = dati.reduce((a, r) => a + r.d.punti, 0);
+    return box.append(h("div", { class: "card" }, h("h2", { text: `Classifica cumulativa (${(D.storico || []).length} stagioni archiviate${eventiOk().length ? " + stagione in corso" : ""})` }),
+      tabella("cum", [
+        { k: "pos", t: "Pos", v: r => r.pos, a: "r" }, { k: "nome", t: "Giocatore", v: r => r.nome, f: v => etichettaUt(v) },
+        { k: "p", t: "Totale", v: r => r.d.punti, a: "r" }, { k: "perc", t: "% sul totale", v: r => r.d.punti, a: "r", sort: false, f: v => pct(v, tot) },
+        { k: "st", t: "Stagioni", v: r => r.d.stagioni, a: "r" }, { k: "ti", t: "Titoli", v: r => r.d.titoli, a: "r" },
+        { k: "me", t: "Media a stagione", v: r => r.d.punti / r.d.stagioni, a: "r", f: v => v.toFixed(1) },
+      ], dati, ["pos", false], { vuoto: "Nessun dato: non ci sono stagioni archiviate né eventi." })));
+  }
+  const st = D.storico || [];
+  if (!st.length) return box.append(h("div", { class: "card" }, h("p", { text: "Nessuna stagione archiviata." })));
+  const idx = vista.arg !== null && vista.arg !== undefined && st[vista.arg] ? vista.arg : st.length - 1;
+  const sel = h("select", { onchange: ev => { vista.arg = parseInt(ev.target.value, 10); render(); } }, st.map((x, i) => h("option", { value: i, selected: i === idx, text: `${x.nome} (chiusa il ${x.chiusa})` })));
+  const x = st[idx];
+  box.append(h("div", { class: "card" }, h("h2", { text: x.nome + " - giocatori" }), sel,
+    tabella("sg", [{ k: "pos", t: "Pos", v: r => r.pos, a: "r" }, { k: "n", t: "Giocatore", v: r => r.nome }, { k: "p", t: "Punti", v: r => r.punti, a: "r" },
+      { k: "m", t: "Musicisti", v: r => (r.musicisti || []).join(", ") || null, sort: false }], x.classifica, ["pos", false])));
+  box.append(h("div", { class: "card" }, h("h2", { text: x.nome + " - musicisti" }),
+    tabella("sm", [{ k: "pos", t: "Pos", v: r => r.pos, a: "r" }, { k: "n", t: "Musicista", v: r => r.nome }, { k: "s", t: "Squadra", v: r => r.squadra }, { k: "p", t: "Punti", v: r => r.punti, a: "r" }], x.musicisti, ["pos", false])));
+};
+
+// ----- impostazioni -----
+VISTE.impost = function (box) {
+  vista.sub = vista.sub || "pref";
+  box.append(sottoMenu([["pref", "Preferenze"], ["sopr", "Soprannomi musicisti"], ["stag", "Impostazioni stagione"]], vista.sub));
+  if (vista.sub === "pref") {
+    const sop = h("input", { maxlength: 20, value: (S.prefs && S.prefs.soprannome) || "", placeholder: "soprannome (max 20 caratteri)", oninput: () => sporco = true });
+    const sc = h("select", { onchange: ev => { ls.set("fm_scala", ev.target.value); document.body.dataset.scala = ev.target.value; } },
+      [["0", "Testo piccolo"], ["1", "Testo medio"], ["2", "Testo grande"]].map(([v, t]) => h("option", { value: v, selected: v === ls.get("fm_scala", "1"), text: t })));
+    const esito = h("div", { class: "esito" });
+    box.append(h("div", { class: "card" }, h("h2", { text: "Preferenze personali" }),
+      io.ruolo === "giocatore" ? h("div", null, h("h3", { text: "Soprannome (si vede in classifica)" }), sop,
+        h("div", { class: "riga" }, h("button", { class: "n", text: "Salva soprannome", onclick: async () => { if (await invia("pref_soprannome", { testo: sop.value.trim() }, esito)) sporco = false; } })), esito) : null,
+      h("h3", { text: "Aspetto" }), sc,
+      h("p", { class: "dim", text: "Il colore si sceglie con i pallini in alto. Queste scelte restano su questo dispositivo." })));
+  } else if (vista.sub === "sopr") {
+    const c = h("div", { class: "card" }, h("h2", { text: "I tuoi soprannomi per i musicisti" }), h("p", { class: "dim", text: "Li vedi solo tu, accanto al nome ufficiale." }));
+    if (io.ruolo !== "giocatore") c.append(h("p", { text: "Disponibile solo per i giocatori." }));
+    else D.musicisti.slice().sort((a, b) => a.nome.localeCompare(b.nome)).forEach(m => {
+      const inp = h("input", { maxlength: 30, value: mioSopr(m.id), placeholder: "soprannome", oninput: () => sporco = true });
+      c.append(h("div", { class: "riga" }, h("span", { class: "auto", style: "min-width:160px" }, cellaMus(m)), inp,
+        h("button", { class: "n picc auto", text: "Salva", onclick: () => invia("pref_sopr_musicista", { musicista_id: m.id, testo: inp.value.trim() }) })));
+    });
+    box.append(c);
+  } else {
+    const s = D.impostazioni;
+    box.append(h("div", { class: "card" }, h("h2", { text: "Impostazioni della stagione (sola lettura)" }), h("table", null, h("tbody", [
+      ["Stagione", s.stagione], ["Musicisti per squadra", s.musicisti_per_squadra], ["Budget iniziale", s.budget_iniziale],
+      ["Rilancio minimo all'asta", s.rilancio_minimo], ["Mercato", s.mercato_aperto === false ? "chiuso" : "aperto"],
+      ["Scambi consentiti a testa", s.scambi_max === undefined ? 3 : s.scambi_max]].map(([a, b]) => h("tr", null, h("td", { text: a }), h("td", { text: String(b) })))))));
+  }
+};
+
+// ---------------------------------------------------------------------------------------------
+// Asta live
+// ---------------------------------------------------------------------------------------------
+let A = null;                         // {corr, offerte, messaggi, squadre, musicisti}
+let ultimoM = null, bannerT = null, contoT = null;
+async function caricaAsta() {
+  const corr = (await leggiTab("asta_corrente?select=*&id=eq.1"))[0] || {};
+  const [off, msg, sq, mu] = await Promise.all([
+    corr.musicista_id != null ? leggiTab(`asta_offerte?select=*&musicista_id=eq.${corr.musicista_id}&order=id.desc&limit=30`) : Promise.resolve([]),
+    leggiTab("asta_messaggi?select=*&order=id.desc&limit=40"), leggiTab("asta_squadre?select=*&order=nome"), leggiTab("asta_musicisti?select=*&order=nome")]);
+  A = { corr, offerte: off, messaggi: msg, squadre: sq, musicisti: mu };
+  if (vista.tab === "asta") disegnaAsta();
+}
+VISTE.asta = function (box) {
+  const root = h("div", { id: "as-root", class: "grid2" });
+  const sinistra = h("section"), destra = h("section");
+  const controlli = h("div", { id: "as-controlli", class: io.ruolo === "admin" ? "nascosto" : "" },
+    h("div", { class: "riga", id: "as-rapidi" }),
+    h("div", { class: "riga" }, h("input", { id: "as-importo", type: "number", inputmode: "numeric", min: 1, placeholder: "Importo" }),
+      h("button", { class: "n auto", id: "as-rilancia", text: "Rilancia", onclick: () => { const v = parseInt($("#as-importo").value, 10); if (isNaN(v)) return asEsito("Scrivi un importo", true); rilancia(v); } })));
+  sinistra.append(h("div", { class: "card" }, h("h2", { text: "In asta" }), h("div", { class: "grande", id: "as-musicista", text: "Nessuna asta aperta" }),
+    h("div", { class: "dim", id: "as-miglior", style: "margin-top:6px" }), h("div", { class: "dim", id: "as-miei", style: "margin-top:6px" }), controlli, h("div", { class: "esito", id: "as-esito" })),
+    h("div", { class: "card" }, h("h2", { text: "Offerte" }), h("ul", { class: "lista", id: "as-offerte" })));
+  destra.append(h("div", { class: "card" }, h("h2", { text: "Canale dell'asta" }), h("div", { class: "lista", id: "as-messaggi" })),
+    h("div", { class: "card" }, h("h2", null, "Squadre ", h("span", { class: "dim", id: "as-online" })), h("ul", { class: "lista", id: "as-squadre", style: "max-height:none" })));
+  root.append(sinistra, destra, h("div", { class: "card" }, h("h2", { text: "Musicisti disponibili" }), h("ul", { class: "lista", id: "as-liberi" })),
+    h("div", { class: "card" }, h("h2", { text: "Musicisti assegnati" }), h("ul", { class: "lista", id: "as-assegnati" })));
+  box.append(root);
+  const app = $("#app"); app.innerHTML = ""; app.append(box);
+  if (A) disegnaAsta(); else caricaAsta().catch(e => asEsito("Connessione: " + e.message, true));
+};
+function asEsito(t, err) { const e = $("#as-esito"); if (e) { e.className = "esito " + (err ? "err" : "ok"); e.textContent = t; } }
+function limitiAsta() {
+  const c = A.corr, s = A.squadre.find(x => x.nome === io.nome);
+  return { min: c && c.miglior_importo != null ? c.miglior_importo + c.rilancio_min : 1, max: s ? s.crediti - (s.posti - 1) : 0, s };
+}
+function disegnaAsta() {
+  if (!$("#as-root") || !A) return;
+  const c = A.corr || {};
+  $("#as-musicista").textContent = c.aperta ? c.musicista : "Nessuna asta aperta";
+  $("#as-miglior").textContent = c.aperta
+    ? (c.miglior_importo != null ? `Miglior offerta: ${c.miglior_importo} crediti di ${c.miglior_offerente}` : "Nessuna offerta (base 1 credito)") + ` - rilancio minimo ${c.rilancio_min}`
+    : (c.musicista ? "Ultima asta: " + c.musicista : "");
+  const { min, max, s } = limitiAsta();
+  $("#as-miei").textContent = s && io.ruolo === "giocatore" ? `I tuoi crediti: ${s.crediti} - posti liberi: ${s.posti}` : "";
+  if (io.ruolo !== "admin") {
+    const primo = c.aperta && c.miglior_offerente === io.nome, attivo = c.aperta && !primo && s && s.posti > 0 && max >= min;
+    $("#as-rilancia").disabled = !attivo;
+    $("#as-importo").placeholder = attivo ? `da ${min} a ${max}` : "Importo";
+    const r = $("#as-rapidi"); r.innerHTML = "";
+    [min, min + 4, min + 9].forEach(v => r.append(h("button", { class: "n", text: String(v), disabled: !attivo || v > max, onclick: () => rilancia(v) })));
+    if (primo) asEsito("Sei il miglior offerente!");
+  }
+  const off = $("#as-offerte"); off.innerHTML = "";
+  if (!A.offerte.length) off.append(h("li", { class: "dim", text: "Nessuna offerta" }));
+  A.offerte.forEach(o => off.append(h("li", { class: o.giocatore === io.nome ? "io" : "" }, h("span", { text: o.giocatore }), h("span", { text: o.importo + " cr." }))));
+  const ms = $("#as-messaggi"); ms.innerHTML = "";
+  A.messaggi.forEach(m => ms.append(h("div", { class: "msg", text: m.testo })));
+  const sq = $("#as-squadre"); sq.innerHTML = ""; let on = 0;
+  A.squadre.forEach(t => {
+    const online = t.visto && (Date.now() - Date.parse(t.visto)) < 30000; if (online) on++;
+    sq.append(h("li", { class: t.nome === io.nome ? "io" : "" }, h("span", null, h("span", { class: "punto" + (online ? " on" : "") }), t.nome), h("span", { class: "dim", text: `${t.crediti} cr. - ${t.posti} posti` })));
+    const mie = A.musicisti.filter(m => m.proprietario === t.nome).map(m => m.nome);
+    if (mie.length) sq.append(h("li", { class: "dim", text: "   " + mie.join(", ") }));
+  });
+  $("#as-online").textContent = `(${on} collegati)`;
+  const l1 = $("#as-liberi"), l2 = $("#as-assegnati"); l1.innerHTML = ""; l2.innerHTML = "";
+  A.musicisti.forEach(m => {
+    if (m.proprietario) l2.append(h("li", null, h("span", { text: m.nome }), h("span", { class: "dim", text: `${m.proprietario} - ${m.prezzo} cr.` })));
+    else l1.append(h("li", null, h("span", { text: m.nome }), c.aperta && c.musicista_id === m.id ? h("span", { class: "tag", text: "IN ASTA" }) : null));
+  });
+  if (!l1.children.length) l1.append(h("li", { class: "dim", text: "Nessuno" }));
+  if (!l2.children.length) l2.append(h("li", { class: "dim", text: "Nessuno" }));
+}
+async function rilancia(importo) {
+  asEsito("...");
+  try {
+    const r = await rpc("asta_rilancia", { p_codice: io.codice, p_importo: importo });
+    if (!r.ok) { asEsito(r.errore, true); beep(200, 250); return; }
+    asEsito("Offerta di " + importo + " inviata"); const i = $("#as-importo"); if (i) i.value = "";
+    caricaAsta().catch(() => {});
+  } catch (e) { asEsito("Errore: " + e.message, true); }
+}
+function nuovoMessaggio(testo) {
+  if (/^\d{1,3}$/.test(testo.trim())) {
+    const c = $("#conto"); c.textContent = testo.trim(); c.style.display = "flex";
+    clearTimeout(contoT); contoT = setTimeout(() => c.style.display = "none", 900); beep(1000, 150); return;
+  }
+  const b = $("#banner"); b.textContent = testo; b.style.display = "block";
+  clearTimeout(bannerT); bannerT = setTimeout(() => b.style.display = "none", 8000); beep(740, 200);
+}
+async function messaggiNuovi() {
+  if (ultimoM === null) return;
+  const nuovi = await leggiTab(`asta_messaggi?select=*&id=gt.${ultimoM}&order=id.asc&limit=20`);
+  nuovi.forEach(m => nuovoMessaggio(m.testo));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Collegamento: accesso, caricamento, controllo periodico
+// ---------------------------------------------------------------------------------------------
+let firma = null, occupato = false, ultimoOk = 0, timers = [];
+async function carica() {
+  const r = await rpc("fm_leggi", { p_codice: io.codice });
+  if (!r.ok) throw new Error(r.errore || "Accesso negato");
+  S.vuoto = !!r.vuoto;
+  if (!r.vuoto) { S.dati = r.dati; S.versione = r.versione; S.prefs = r.prefs || {}; S.richieste = r.richieste || []; indicizza(); notificaRichieste(); }
+  if (!sporco && !(vista.tab === "asta" && $("#as-root"))) render(); else disegnaNav();
+  ultimoOk = Date.now();
+}
+async function controlla() {
+  if (!io || occupato) return;
+  occupato = true;
+  try {
+    const v = await rpc("fm_versione");
+    const f = `${v.v}|${v.n}|${v.e}`;
+    if (f !== firma) { firma = f; await carica(); }
+    if (v.m !== ultimoM) { const prima = ultimoM; if (prima !== null) await messaggiNuovi(); ultimoM = v.m; if (vista.tab === "asta") await caricaAsta(); }
+    else if (v.a !== controlla.a) { if (vista.tab === "asta") await caricaAsta(); }
+    controlla.a = v.a;
+    ultimoOk = Date.now();
+    $("#stato").textContent = "● online"; $("#stato").style.color = "var(--accent)";
+  } catch (e) {
+    $("#stato").textContent = "● non raggiungibile"; $("#stato").style.color = "var(--rosso)";
+  } finally { occupato = false; }
+}
 async function entra(codice) {
   $("#loginerr").textContent = "";
-  const { data, error } = await sb.rpc("asta_login", { p_codice: codice });
-  if (error) { $("#loginerr").textContent = "Errore di connessione: " + error.message; return false; }
-  if (!data.ok) { $("#loginerr").textContent = data.errore || "Codice non valido"; return false; }
-  io = { codice: codice, nome: data.nome, ruolo: data.ruolo };
-  try { localStorage.setItem("fm_codice", codice); } catch (e) {}
-  avvia();
+  let r;
+  try { r = await rpc("fm_login", { p_codice: codice }); }
+  catch (e) { $("#loginerr").textContent = "Errore di connessione: " + e.message; return false; }
+  if (!r.ok) { $("#loginerr").textContent = r.errore || "Codice non valido"; return false; }
+  io = { codice, nome: r.nome, ruolo: r.ruolo };
+  ls.set("fm_codice", codice);
+  $("#login").classList.add("nascosto"); $("#app").classList.remove("nascosto"); $("#nav").classList.remove("nascosto");
+  $("#esci").classList.remove("nascosto");
+  if (io.ruolo === "giocatore") $("#btnRich").classList.remove("nascosto");
+  $("#chi").textContent = io.ruolo === "admin" ? "Osservatore (admin)" : io.nome;
+  try { await carica(); } catch (e) { $("#app").append(h("div", { class: "card esito err", text: "Errore: " + e.message })); }
+  try { const m = await rpc("fm_versione"); ultimoM = m.m; firma = `${m.v}|${m.n}|${m.e}`; controlla.a = m.a; } catch (e) {}
+  timers.push(setInterval(controlla, 2500));
+  if (io.ruolo === "giocatore") { const ping = () => rpc("asta_ping", { p_codice: io.codice }).catch(() => {}); ping(); timers.push(setInterval(ping, 10000)); }
   return true;
 }
 $("#entra").onclick = () => { beep(660, 80); entra($("#codice").value.trim()); };
 $("#codice").addEventListener("keydown", e => { if (e.key === "Enter") $("#entra").click(); });
-$("#esci").onclick = () => { try { localStorage.removeItem("fm_codice"); } catch (e) {} location.reload(); };
-
-function avvia() {
-  $("#login").classList.add("nascosto");
-  $("#app").classList.remove("nascosto");
-  $("#esci").classList.remove("nascosto");
-  $("#chi").textContent = io.ruolo === "admin" ? "Osservatore (admin)" : "Giocatore: " + io.nome;
-  $("#controlli").classList.toggle("nascosto", io.ruolo === "admin");
-  refresh();
-  canale = sb.channel("asta-live");
-  ["asta_corrente", "asta_offerte", "asta_messaggi", "asta_squadre", "asta_musicisti"].forEach(t =>
-    canale.on("postgres_changes", { event: "*", schema: "public", table: t }, () => refresh()));
-  canale.subscribe();
-  timers.push(setInterval(refresh, 4000));                       // rete di sicurezza se il realtime non arriva
-  if (io.ruolo !== "admin") {
-    const ping = () => sb.rpc("asta_ping", { p_codice: io.codice });
-    ping(); timers.push(setInterval(ping, 10000));
-  }
-}
-
-// ---------- dati ----------
-async function refresh() {
-  if (!io || occupato) return;
-  occupato = true;
-  try {
-    const corr = (await sb.from("asta_corrente").select("*").eq("id", 1).single()).data;
-    const [off, msg, sq, mu] = await Promise.all([
-      corr && corr.musicista_id != null
-        ? sb.from("asta_offerte").select("*").eq("musicista_id", corr.musicista_id).order("id", { ascending: false }).limit(30)
-        : Promise.resolve({ data: [] }),
-      sb.from("asta_messaggi").select("*").order("id", { ascending: false }).limit(40),
-      sb.from("asta_squadre").select("*").order("nome"),
-      sb.from("asta_musicisti").select("*").order("nome"),
-    ]);
-    stato = { corr: corr, offerte: off.data || [], messaggi: msg.data || [], squadre: sq.data || [], musicisti: mu.data || [] };
-    disegna();
-  } catch (e) {
-    $("#esito").className = "esito err"; $("#esito").textContent = "Connessione: " + (e.message || e);
-  } finally { occupato = false; }
-}
-
-function io_squadra() { return stato.squadre.find(s => s.nome === io.nome); }
-function limiti() {
-  const c = stato.corr, s = io_squadra();
-  const min = c && c.miglior_importo != null ? c.miglior_importo + c.rilancio_min : 1;
-  const max = s ? s.crediti - (s.posti - 1) : 0;
-  return { min, max };
-}
-
-function disegna() {
-  const c = stato.corr || {};
-  $("#musicista").textContent = c.aperta ? c.musicista : "Nessuna asta aperta";
-  $("#miglior").textContent = c.aperta
-    ? (c.miglior_importo != null ? `Miglior offerta: ${c.miglior_importo} crediti di ${c.miglior_offerente}` : "Nessuna offerta (base 1 credito)") +
-      ` - rilancio minimo ${c.rilancio_min}`
-    : (c.musicista ? "Ultima asta: " + c.musicista : "");
-  const s = io_squadra();
-  $("#miei").textContent = s ? `I tuoi crediti: ${s.crediti} - posti liberi: ${s.posti}` : "";
-
-  if (io.ruolo !== "admin") {
-    const { min, max } = limiti();
-    const sono_primo = c.aperta && c.miglior_offerente === io.nome;
-    const attivo = c.aperta && !sono_primo && s && s.posti > 0 && max >= min;
-    $("#rilancia").disabled = !attivo;
-    $("#importo").placeholder = attivo ? `da ${min} a ${max}` : "Importo";
-    const r = $("#rapidi"); r.innerHTML = "";
-    [min, min + 4, min + 9].forEach(v => {
-      const b = el("button", "n", String(v)); b.disabled = !attivo || v > max;
-      b.onclick = () => rilancia(v); r.appendChild(b);
-    });
-    if (sono_primo) { $("#esito").className = "esito ok"; $("#esito").textContent = "Sei il miglior offerente!"; }
-  }
-
-  const off = $("#offerte"); off.innerHTML = "";
-  if (!stato.offerte.length) off.appendChild(el("li", "dim", "Nessuna offerta"));
-  stato.offerte.forEach(o => {
-    const li = el("li", o.giocatore === io.nome ? "io" : "");
-    li.appendChild(el("span", "", o.giocatore)); li.appendChild(el("span", "", o.importo + " cr."));
-    off.appendChild(li);
-  });
-
-  const ms = $("#messaggi"); ms.innerHTML = "";
-  stato.messaggi.forEach(m => ms.appendChild(el("div", "msg admin", m.testo)));
-  const ultimo = stato.messaggi[0];
-  if (ultimo) {
-    if (ultimoMsg !== null && ultimo.id > ultimoMsg) nuovoMessaggio(ultimo.testo);
-    ultimoMsg = ultimo.id;
-  } else if (ultimoMsg === null) ultimoMsg = 0;
-
-  const sq = $("#squadre"); sq.innerHTML = "";
-  let on = 0;
-  stato.squadre.forEach(t => {
-    const online = t.visto && (Date.now() - Date.parse(t.visto)) < 30000;
-    if (online) on++;
-    const li = el("li", t.nome === io.nome ? "io" : "");
-    const sx = el("span"); sx.appendChild(el("span", "punto" + (online ? " on" : ""))); sx.appendChild(document.createTextNode(t.nome));
-    const mie = stato.musicisti.filter(m => m.proprietario === t.nome).map(m => m.nome);
-    li.appendChild(sx); li.appendChild(el("span", "dim", `${t.crediti} cr. - ${t.posti} posti`));
-    sq.appendChild(li);
-    if (mie.length) sq.appendChild(el("li", "dim", "   " + mie.join(", ")));
-  });
-  $("#nonline").textContent = `(${on} collegati)`;
-
-  const li1 = $("#liberi"); li1.innerHTML = "";
-  const li2 = $("#assegnati"); li2.innerHTML = "";
-  stato.musicisti.forEach(m => {
-    if (m.proprietario) {
-      const li = el("li"); li.appendChild(el("span", "", m.nome)); li.appendChild(el("span", "dim", `${m.proprietario} - ${m.prezzo} cr.`)); li2.appendChild(li);
-    } else {
-      const li = el("li"); li.appendChild(el("span", "", m.nome));
-      if (c.aperta && c.musicista_id === m.id) li.appendChild(el("span", "tag", "IN ASTA"));
-      li1.appendChild(li);
-    }
-  });
-  if (!li1.children.length) li1.appendChild(el("li", "dim", "Nessuno"));
-  if (!li2.children.length) li2.appendChild(el("li", "dim", "Nessuno"));
-}
-
-function nuovoMessaggio(testo) {
-  if (/^\d{1,3}$/.test(testo.trim())) {            // conto alla rovescia: numero gigante
-    const c = $("#conto"); c.textContent = testo.trim(); c.style.display = "flex";
-    clearTimeout(contoT); contoT = setTimeout(() => c.style.display = "none", 900);
-    beep(1000, 150);
-    return;
-  }
-  const b = $("#banner"); b.textContent = testo; b.style.display = "block";
-  clearTimeout(bannerT); bannerT = setTimeout(() => b.style.display = "none", 8000);
-  beep(740, 200);
-}
-
-// ---------- rilancio ----------
-async function rilancia(importo) {
-  const esito = $("#esito");
-  esito.className = "esito"; esito.textContent = "...";
-  const { data, error } = await sb.rpc("asta_rilancia", { p_codice: io.codice, p_importo: importo });
-  if (error) { esito.className = "esito err"; esito.textContent = "Errore: " + error.message; return; }
-  if (!data.ok) { esito.className = "esito err"; esito.textContent = data.errore; beep(200, 250); return; }
-  esito.className = "esito ok"; esito.textContent = "Offerta di " + importo + " inviata";
-  $("#importo").value = "";
-  refresh();
-}
-$("#rilancia").onclick = () => {
-  const v = parseInt($("#importo").value, 10);
-  if (isNaN(v)) { $("#esito").className = "esito err"; $("#esito").textContent = "Scrivi un importo"; return; }
-  rilancia(v);
-};
-$("#importo").addEventListener("keydown", e => { if (e.key === "Enter") $("#rilancia").click(); });
-
-// ---------- accesso automatico ----------
-try { const salvato = localStorage.getItem("fm_codice"); if (salvato) { $("#codice").value = salvato; entra(salvato); } } catch (e) {}
+$("#esci").onclick = () => { ls.del("fm_codice"); location.reload(); };
+$("#modale").addEventListener("click", e => { if (e.target.id === "modale") chiudiModale(); });
+{ const salvato = ls.get("fm_codice", ""); if (salvato) { $("#codice").value = salvato; entra(salvato); } }
 </script>
 </body>
 </html>
