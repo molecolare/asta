@@ -247,6 +247,17 @@ function descriviPunteggio(a) {
   return sl.length === 1 ? descriviSlot(a, sl[0]) : sl.map(s => `${s.ruolo}: ${descriviSlot(a, s)}`).join(" | ");
 }
 const descriviBonus = b => `${b.nome} (${sgn(b.valore)}${b.tipo === "percentuale" ? "%" : ""})`;
+const descriviBonusEsteso = b => b && b.descrizione ? `${descriviBonus(b)} — ${b.descrizione}` : descriviBonus(b);
+const oggiLocale = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+function bonusAttivo(b, oggi) {
+  const d = b.durata || "permanente"; oggi = oggi || oggiLocale();
+  if (d === "eventi") return Number(b.eventi_rimasti || 0) > 0;
+  if (d === "a_tempo" || d === "date") return (!b.da || oggi >= b.da) && (!b.a || oggi <= b.a);
+  return true;
+}
+const buffGiocatore = nome => (D.bonus || []).filter(b => b.bersaglio === "giocatore" && b.giocatore === nome && bonusAttivo(b));
+const buffMusicista = m => (D.bonus || []).filter(b => ((b.bersaglio === "musicista" && b.musicista_id === m.id) ||
+  (b.bersaglio === "giocatore" && m.proprietario && b.giocatore === m.proprietario)) && bonusAttivo(b));
 // opz.breve: senza il numero di gruppo; opz.senzaRuolo: senza il ruolo (nei dettagli è già accanto al nome)
 function descriviCalcolo(e, opz) {
   opz = opz || {};
@@ -469,12 +480,13 @@ VISTE.classifica = function (box) {
 function modaleMusicista(mid) {
   const m = MUS.get(mid); if (!m) return;
   const ev = eventiRecenti(0, e => e.musicista_id === mid);
-  const campi = campiPer("musicisti");
+  const campi = campiPer("musicisti"), buffs = buffMusicista(m);
   apriModale(h("div", { class: "card" },
     h("h2", { text: m.nome }),
     m.soprannome ? h("p", { class: "dim", text: "Soprannome: " + m.soprannome }) : null,
     h("p", null, "Squadra: ", m.proprietario ? `${m.proprietario} (prezzo ${m.prezzo})` : "nessuna", " - Punti: ", h("b", { text: puntiMus(mid) })),
-    campi.length ? h("div", null, campi.map(c => h("div", { text: `${c.nome}: ${fmt(valProfilo(m, c))}` }))) : null,
+    campi.length ? h("div", null, campi.map(c => valProfilo(m, c) === undefined ? null : h("div", { text: `${c.nome}: ${fmt(valProfilo(m, c))}` }))) : null,
+    buffs.length ? h("div", null, h("h3", { text: "Buff / debuff attivi" }), buffs.map(b => h("div", { class: "dim", text: descriviBonusEsteso(b) }))) : null,
     h("h3", { text: "Eventi" }),
     tabella("ev_m", colonneEventi(), ev, ["data", true], opzEventi({ vuoto: "Nessun evento.", rid: () => modaleMusicista(mid),
       clicRiga: e => () => modaleEvento(e, () => modaleMusicista(mid)) })),
@@ -488,12 +500,15 @@ VISTE.squadra = function (box) {
   let nome = vista.arg || (io.ruolo === "giocatore" && U(io.nome) && U(io.nome).gioca ? io.nome : (gio[0] && gio[0].nome));
   if (!nome) return box.append(h("p", { text: "Nessun giocatore." }));
   const sel = h("select", { onchange: ev => { vista.arg = ev.target.value; render(); } }, gio.map(u => h("option", { value: u.nome, selected: u.nome === nome, text: etichettaUt(u.nome) })));
-  const s = D.impostazioni, r = rosa(nome), tot = puntiUt(nome), sp = speso(nome);
+  const s = D.impostazioni, r = rosa(nome), tot = puntiUt(nome), sp = speso(nome), u = U(nome);
+  const campiG = campiPer("giocatori"), buffsG = buffGiocatore(nome);
   const righe = r.map(m => ({ m, p: puntiMus(m.id, nome) }));
   const ex = tot - righe.reduce((a, x) => a + x.p, 0);
   const cl = classificaGiocatori().find(x => x.nome === nome);
   box.append(h("div", { class: "card" }, h("h2", { text: "Squadra" }), sel,
     h("p", null, `Crediti residui ${crediti(nome)}/${s.budget_iniziale} - musicisti ${r.length}/${s.musicisti_per_squadra}`),
+    u && campiG.length ? h("div", { class: "dim" }, campiG.map(c => valProfilo(u, c) === undefined ? null : h("div", { text: `${c.nome}: ${fmt(valProfilo(u, c))}` }))) : null,
+    buffsG.length ? h("div", null, h("h3", { text: "Buff / debuff attivi" }), buffsG.map(b => h("div", { class: "dim", text: descriviBonusEsteso(b) }))) : null,
     righe.length ? tabella("sq", [
       { k: "nome", t: "Musicista", v: x => x.m.nome, f: (v, x) => cellaMus(x.m) },
       { k: "prezzo", t: "Prezzo", v: x => x.m.prezzo, a: "r" },
@@ -521,12 +536,14 @@ function modaleEvento(e, torna) {
   // per ogni musicista due righe: "nome ruolo + punti", poi "squadra - come è stato calcolato"
   const blocchi = g.map(x => {
     const ruolo = etichettaRuolo(x), calcolo = descriviCalcolo(x, { breve: true, senzaRuolo: true });
+    const effetti = (x.bonus || []).concat(x.bonus_auto || []);
     return h("div", { class: "evm" + (x.id === e.id && g.length > 1 ? " qui" : "") },
       h("div", { class: "evm1" },
         h("span", { class: "nome", text: nomeMus(x.musicista_id) }),
         ruolo ? h("span", { class: "ruolo", text: ruolo }) : null,
         h("span", { class: "pt" }, puntiTxt(x))),
-      h("div", { class: "dim evm2", text: [x.proprietario || "nessuna squadra", calcolo].filter(Boolean).join(" - ") }));
+      h("div", { class: "dim evm2", text: [x.proprietario || "nessuna squadra", calcolo].filter(Boolean).join(" - ") }),
+      effetti.length ? h("div", { class: "dim evm2", text: "Buff/debuff: " + effetti.map(descriviBonusEsteso).join("; ") }) : null);
   });
   apriModale(h("div", { class: "card" },
     h("h2", { text: p.azione }),
