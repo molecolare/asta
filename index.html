@@ -212,6 +212,16 @@ const speso = nome => rosa(nome).reduce((s, m) => s + m.prezzo, 0);
 const crediti = nome => { const u = U(nome); return D.impostazioni.budget_iniziale - speso(nome) + (u ? (u.saldo || 0) : 0); };
 const eventiOk = () => D.eventi.filter(e => (e.stato || "ok") === "ok");
 const eventiPending = () => D.eventi.filter(e => e.stato === "pending");
+const eventiAutoChiusi = () => D.eventi.filter(e => e.stato === "ok" && e.chiusura_automatica_voti);
+function aventiVoto(e) {
+  const snap = Array.isArray(e.aventi_diritto_voto) ? e.aventi_diritto_voto.filter(Boolean) : [];
+  return snap.length ? [...new Set(snap)] : D.utenti.filter(u => u.gioca !== false).map(u => u.nome);
+}
+function progressoVoti(e) {
+  const aventi = aventiVoto(e), ammessi = new Set(aventi);
+  const fatti = new Set((e.votanti || []).filter(n => ammessi.has(n)));
+  return [fatti.size, aventi.length];
+}
 const puntiMus = (mid, prop) => (prop === undefined ? PT.mus.get(mid) : PT.coppie.get(mid + "|" + prop)) || 0;
 const puntiUt = nome => PT.ut.get(nome) || 0;
 const nomeMus = mid => { const m = MUS.get(mid); return m ? m.nome : "?"; };
@@ -569,8 +579,12 @@ function colonneEventi() {
 
 VISTE.eventi = function (box) {
   vista.sub = vista.sub || "ultimi";
-  const np = eventiPending().length;
-  box.append(sottoMenu([["ultimi", "Ultimi eventi"], ["pending", "Pending (" + np + ")"], ["proponi", io.ruolo === "admin" ? "Registra un evento" : "Proponi un evento"]], vista.sub));
+  if (vista.sub === "auto" && io.ruolo !== "admin") vista.sub = "ultimi";
+  const np = eventiPending().length, na = eventiAutoChiusi().length;
+  const menu = [["ultimi", "Ultimi eventi"], ["pending", "Pending (" + np + ")"]];
+  if (io.ruolo === "admin") menu.push(["auto", "Auto-chiusi voti (" + na + ")"]);
+  menu.push(["proponi", io.ruolo === "admin" ? "Registra un evento" : "Proponi un evento"]);
+  box.append(sottoMenu(menu, vista.sub));
   if (vista.sub === "ultimi") {
     const per = ls.get("fm_periodo", "30g");
     const sel = h("select", { onchange: ev => { ls.set("fm_periodo", ev.target.value); render(); } },
@@ -581,55 +595,65 @@ VISTE.eventi = function (box) {
       tabella("ev", colonneEventi(), ev, ["data", true],
         opzEventi({ vuoto: `Nessun evento: ${etichettaPeriodo(per)}. Scegli un periodo più lungo qui sopra.` }))));
   } else if (vista.sub === "pending") vistaPending(box);
+  else if (vista.sub === "auto") vistaAutoChiusi(box);
   else vistaProponi(box);
 };
+
+function vistaAutoChiusi(box) {
+  const ev = eventiRecenti(0, e => e.stato === "ok" && e.chiusura_automatica_voti, true);
+  box.append(h("div", { class: "card" }, h("h2", { text: "Pending chiusi automaticamente" }),
+    h("p", { class: "dim", text: "Solo admin: sondaggi che si sono chiusi da soli quando hanno votato tutti i giocatori aventi diritto. Se trovi un problema puoi rimuovere l'evento dall'app Kivy." }),
+    tabella("ev_auto", colonneEventi(), ev, ["data", true],
+      opzEventi({ vuoto: "Nessun sondaggio chiuso automaticamente." }))));
+}
 
 function vistaPending(box) {
   const pend = eventiPending();
   const c = h("div", { class: "card" }, h("h2", { text: "Eventi in pending" }),
-    h("p", { class: "dim", text: "Il punteggio si decide dopo il sondaggio, oppure l'admin deve ancora confermare la proposta." }));
+    h("p", { class: "dim", text: "Nei sondaggi il voto è segreto: si vede solo quante persone hanno votato. Quando hanno votato tutti gli aventi diritto il punteggio viene calcolato e l'evento si chiude automaticamente." }));
   if (!pend.length) c.append(h("p", { text: "Nessun evento in pending." }));
   pend.sort((a, b) => b.id - a.id).forEach(e => {
     const az = D.azioni.find(a => a.id === e.azione_id);
-    const sond = az && az.modalita === "sondaggio" && Array.isArray(e.fascia);
+    const sond = Array.isArray(e.fascia) || (az && az.modalita === "sondaggio" && e.proposta_base == null);
     const [lo, hi] = e.fascia || (az ? [az.min, az.max] : [1, 10]);
-    const gia = (e.votanti || []).includes(io.nome);
+    const aventi = aventiVoto(e), [fatti, necessari] = progressoVoti(e);
+    const gia = (e.votanti || []).includes(io.nome), puo = aventi.includes(io.nome);
     const blocco = h("div", { class: "blocco" },
-      h("div", null, h("b", { text: `#${e.id} ${nomeMus(e.musicista_id)} - ${e.azione}` }), h("span", { class: "tag", text: e.da_approvare && e.proposta_base != null ? "DA CONFERMARE" : "PENDING" })),
+      h("div", null, h("b", { text: `#${e.id} ${nomeMus(e.musicista_id)} - ${e.azione}` }),
+        h("span", { class: "tag", text: e.da_approvare && e.proposta_base != null ? "DA CONFERMARE" : (sond ? `${fatti}/${necessari} VOTI` : "PENDING") })),
       h("div", { class: "dim", text: `${e.data}${e.proposto_da ? " | proposto da " + e.proposto_da : ""} | squadra: ${fmt(e.proprietario)}` }));
     if (e.proposta_base != null) blocco.append(h("div", null, `Punteggio proposto: ${sgn(calcolaPunti(e.proposta_base, e.bonus || []))}`, e.dettaglio ? ` (${e.dettaglio})` : ""));
     if (sond) {
-      const voti = e.voti || [];
-      blocco.append(h("div", null, `Voti: ${voti.join(", ") || "nessuno"}`, voti.length ? ` (media ${mediaVoti(voti)})` : ""));
-      if (io.ruolo === "giocatore" && !gia) {
-        const inp = h("input", { type: "number", min: lo, max: hi, placeholder: `il tuo voto (${lo}-${hi})`, inputmode: "numeric" });
+      blocco.append(h("div", null, `Voto segreto: ${fatti}/${necessari} giocatori hanno votato.`));
+      if (io.ruolo === "giocatore" && puo && !gia) {
+        const inp = h("input", { type: "number", min: lo, max: hi, placeholder: `il tuo voto segreto (${lo}-${hi})`, inputmode: "numeric" });
         blocco.append(h("div", { class: "riga" }, inp, h("button", { class: "n auto", text: "Vota", onclick: () => {
           const v = parseInt(inp.value, 10);
           if (isNaN(v) || v < lo || v > hi) return toast(`Il voto va da ${lo} a ${hi}`, true);
           invia("voto", { evento_id: e.id, voto: v });
         } })));
-      } else if (gia) blocco.append(h("div", { class: "dim", text: "Hai già votato." }));
+      } else if (gia) blocco.append(h("div", { class: "dim", text: "Hai già votato. Il tuo voto resta segreto fino alla chiusura." }));
+      else if (io.ruolo === "giocatore" && !puo) blocco.append(h("div", { class: "dim", text: "Non eri tra i giocatori aventi diritto quando questo sondaggio è stato aperto." }));
     }
-    if (io.ruolo === "admin") comandiPending(blocco, e, pend, sond, lo, hi);
+    if (io.ruolo === "admin") comandiPending(blocco, e, pend, sond);
     c.append(blocco);
   });
   box.append(c);
 }
-function comandiPending(blocco, e, pend, sond, lo, hi) {
+function comandiPending(blocco, e, pend, sond) {
   const es = h("div", { class: "esito" }), r = h("div", { class: "riga" });
   const gruppo = e.gruppo ? pend.filter(x => x.gruppo === e.gruppo) : [];
   if (gruppo.length > 1) blocco.append(h("div", { class: "dim", text: "Vale per: " + gruppo.map(x => nomeMus(x.musicista_id) + (x.ruolo ? ` (${x.ruolo})` : "")).join(", ") }));
-  if (e.proposta_base != null) r.append(h("button", { class: "n", text: "Conferma come proposto", onclick: () => opAdmin("conferma", { id: e.id }, es) }));
-  else if (sond) {
-    const inp = h("input", { placeholder: `voti da aggiungere (${lo}-${hi}), es. 6 8 9`, inputmode: "numeric", oninput: () => sporco = true });
-    blocco.append(h("div", { class: "riga" }, inp));
-    r.append(h("button", { class: "n", text: "Salva i voti", onclick: () => opAdmin("voti", { id: e.id, voti: inp.value, modo: "salva" }, es) }),
-      h("button", { class: "n", text: "Chiudi con la media", onclick: () => opAdmin("voti", { id: e.id, voti: inp.value, modo: "chiudi" }, es) }),
-      h("button", { class: "n", text: "Azzera i voti", onclick: () => chiedi(`Azzerare i voti dell'evento #${e.id}?`, "Azzera", () => opAdmin("voti", { id: e.id, modo: "azzera" }, es)) }));
+  if (e.proposta_base != null) {
+    r.append(h("button", { class: "n", text: "Conferma come proposto", onclick: () => opAdmin("conferma", { id: e.id }, es) }));
+  } else if (sond) {
+    const [fatti, necessari] = progressoVoti(e);
+    blocco.append(h("div", { class: "dim", text: `Admin: ${fatti}/${necessari} votanti. Non puoi vedere o inserire i valori mentre il sondaggio è aperto; la chiusura è automatica.` }));
   }
   if (e.da_approvare) r.append(h("button", { class: "n", text: "Rifiuta ed elimina", onclick: () => chiedi(`Rifiutare la proposta #${e.id}${gruppo.length > 1 ? " (e quelle collegate del gruppo)" : ""}? Viene eliminata.`, "Rifiuta", () => opAdmin("rifiuta", { id: e.id }, es)) }));
   blocco.append(r, es);
 }
+
 function chiedi(testo, si, f) {
   apriModale(h("div", { class: "card" }, h("h2", { text: "Conferma" }), h("p", { text: testo }),
     h("div", { class: "riga" }, h("button", { class: "n", text: si, onclick: () => { chiudiModale(); f(); } }), h("button", { class: "n", text: "Annulla", onclick: chiudiModale }))));
@@ -676,7 +700,12 @@ function vistaProponi(box) {
       const r = parseRange(t); if (r) return { range: r };
       const v = parseInt(t, 10); return isNaN(v) ? { errore: true } : { fisso: v };
     };
-    if (a.modalita === "sondaggio" && !admin) { st.prev.textContent = "Il punteggio dipenderà dal sondaggio: l'evento resta in pending."; return; }
+    if (a.modalita === "sondaggio") {
+      st.prev.textContent = admin
+        ? "Sondaggio segreto: l'evento resta in pending e si chiude automaticamente quando hanno votato tutti i giocatori aventi diritto."
+        : "Il punteggio dipenderà dal sondaggio segreto: il tuo voto non sarà visibile finché il pending non si chiude.";
+      return;
+    }
     const bonus = st.bonus.filter(([cb]) => cb.checked).map(([, b]) => b);
     const q = a.modalita === "tempo" ? parseFloat(String(st.qta.value).replace(",", ".")) : null;
     if (a.modalita === "tempo" && !(q > 0)) { st.prev.textContent = "Scrivi la quantità per vedere il punteggio."; return; }
@@ -713,10 +742,13 @@ function vistaProponi(box) {
         const v = h("input", { type: "number", inputmode: "numeric", placeholder: "punteggio finale (anche negativo)", oninput: () => { sporco = true; anteprima(); } });
         st.punti.push(v); st.voto.push(null); dyn.append(v);
       } else if (a.modalita === "sondaggio") {
-        const v = admin
-          ? h("input", { inputmode: "numeric", placeholder: `voti da ${s.min} a ${s.max}, es. 7 oppure 6 8 9 (vuoto = resta in PENDING)`, oninput: () => { sporco = true; anteprima(); } })
-          : h("input", { type: "number", min: s.min, max: s.max, inputmode: "numeric", placeholder: `il tuo voto ${s.min}-${s.max} (facoltativo)`, oninput: () => sporco = true });
-        st.voto.push(v); st.punti.push(null); dyn.append(v);
+        if (admin) {
+          st.voto.push(null); st.punti.push(null);
+          dyn.append(h("p", { class: "dim", text: `Sondaggio segreto ${s.min}-${s.max}: votano i giocatori una volta ciascuno; l'admin non inserisce voti.` }));
+        } else {
+          const v = h("input", { type: "number", min: s.min, max: s.max, inputmode: "numeric", placeholder: `il tuo voto segreto ${s.min}-${s.max} (facoltativo)`, oninput: () => sporco = true });
+          st.voto.push(v); st.punti.push(null); dyn.append(v);
+        }
       } else { st.voto.push(null); st.punti.push(null); }
     });
     if (a.modalita === "tempo" && !d) {
@@ -754,8 +786,8 @@ function vistaProponi(box) {
     if (ok && vista.tab === "eventi") { sporco = false; vista.sub = admin ? "ultimi" : "pending"; render(); }
   } });
   box.append(h("div", { class: "card" }, h("h2", { text: admin ? "Registra un evento" : "Proponi un evento" }),
-    h("p", { class: "dim", text: admin ? "L'evento vale subito. Nei sondaggi puoi scrivere uno o più voti (media) oppure lasciare vuoto: resta in pending."
-      : "Scegli l'azione e i musicisti. L'evento va in pending finché l'admin non lo conferma. Nei sondaggi puoi mettere il tuo voto." }),
+    h("p", { class: "dim", text: admin ? "Gli eventi fissi valgono subito. I sondaggi aprono un pending con voto segreto: l'admin non vota da qui e la chiusura avviene automaticamente quando hanno votato tutti gli aventi diritto."
+      : "Scegli l'azione e i musicisti. Nei sondaggi puoi inserire il tuo voto segreto: il pending si chiude automaticamente quando hanno votato tutti. Le proposte non a sondaggio restano da confermare dall'admin." }),
     selAz, admin ? h("label", { class: "chk" }, cbDitt, "DITTATURA: punteggio finale deciso da te, senza sondaggi, tempo né bonus") : null,
     dyn, h("div", { class: "riga" }, invio), esito));
 }
