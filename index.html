@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FantaBanda</title>
 <style>
-  :root { --bg1:#010d08; --bg2:#05381c; --accent:#40ff80; --accent2:#b3ff59; --testo:#b8ffcc; --panel:rgba(5,28,16,.86); --rosso:#ff5a5a; --fs:15px; }
+  :root { --bg1:#010d08; --bg2:#05381c; --accent:#40ff80; --accent2:#b3ff59; --testo:#b8ffcc; --panel:rgba(5,28,16,.86); --rosso:#ff5a5a; --giallo:#ffd040; --fs:15px; }
   [data-tema="blu"]     { --bg1:#020814; --bg2:#08204d; --accent:#33bfff; --accent2:#73f2ff; --testo:#bfe5ff; --panel:rgba(5,18,43,.86); }
   [data-tema="arancio"] { --bg1:#120803; --bg2:#472105; --accent:#ff8c1f; --accent2:#ffcc40; --testo:#ffdfb8; --panel:rgba(36,15,5,.86); }
   [data-scala="0"] { --fs:13px; } [data-scala="2"] { --fs:17px; }
@@ -51,6 +51,16 @@
   td.r, th.r { text-align: right; }
   tr.io td { color: var(--accent2); }
   tr.cl { cursor: pointer; } tr.cl:hover td { background: rgba(255,255,255,.06); }
+  tr.grp td { background: rgba(255,208,64,.13); }
+  tr.grp td:first-child { box-shadow: inset 3px 0 0 var(--giallo); }
+  tr.grp.cl:hover td { background: rgba(255,208,64,.24); }
+  .coinv { color: var(--giallo); font-size: .85em; white-space: nowrap; }
+  .evm { padding: 8px 2px; border-bottom: 1px dashed rgba(255,255,255,.14); }
+  .evm.qui { background: rgba(255,208,64,.12); box-shadow: inset 3px 0 0 var(--giallo); }
+  .evm1 { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .evm1 .ruolo { color: var(--accent2); font-size: .9em; }
+  .evm1 .pt { margin-left: auto; font-weight: bold; }
+  .evm2 { font-size: .9em; margin-top: 2px; }
   .pos { color: var(--accent); font-weight: bold; }
   .pend { color: var(--accent2); }
   .neg { color: var(--rosso); }
@@ -172,12 +182,28 @@ document.body.dataset.scala = ls.get("fm_scala", "1");
 // ---------------------------------------------------------------------------------------------
 let io = null;                       // {codice, nome, ruolo}
 let S = { dati: null, prefs: {}, richieste: [], versione: null, vuoto: false };
-let D = null, MUS = new Map();
+let D = null, MUS = new Map(), GRP = new Map(), PT = { mus: new Map(), ut: new Map(), coppie: new Map() };
 const SINGOLARI = { minuti: "minuto", ore: "ora", giorni: "giorno", secondi: "secondo", settimane: "settimana", mesi: "mese", anni: "anno" };
 
 function indicizza() {
   D = S.dati;
   MUS = new Map(D.musicisti.map(m => [m.id, m]));
+  GRP = new Map();                      // gruppo -> righe dell'evento, per i dettagli degli elenchi
+  PT = { mus: new Map(), ut: new Map(), coppie: new Map() };   // punti sommati una volta sola
+  const piu = (m, k, v) => m.set(k, (m.get(k) || 0) + v);
+  D.eventi.forEach(e => {
+    if (e.gruppo) {
+      if (!GRP.has(e.gruppo)) GRP.set(e.gruppo, []);
+      GRP.get(e.gruppo).push(e);
+    }
+    if ((e.stato || "ok") !== "ok") return;
+    piu(PT.mus, e.musicista_id, e.punti);
+    if (e.proprietario) {
+      piu(PT.ut, e.proprietario, e.punti);
+      piu(PT.coppie, e.musicista_id + "|" + e.proprietario, e.punti);
+    }
+  });
+  GRP.forEach(v => v.sort((a, b) => a.id - b.id));
 }
 const U = nome => D.utenti.find(u => u.nome.toLowerCase() === String(nome).toLowerCase());
 const giocatori = () => D.utenti.filter(u => u.gioca);
@@ -186,8 +212,8 @@ const speso = nome => rosa(nome).reduce((s, m) => s + m.prezzo, 0);
 const crediti = nome => { const u = U(nome); return D.impostazioni.budget_iniziale - speso(nome) + (u ? (u.saldo || 0) : 0); };
 const eventiOk = () => D.eventi.filter(e => (e.stato || "ok") === "ok");
 const eventiPending = () => D.eventi.filter(e => e.stato === "pending");
-const puntiMus = (mid, prop) => eventiOk().filter(e => e.musicista_id === mid && (prop === undefined || e.proprietario === prop)).reduce((s, e) => s + e.punti, 0);
-const puntiUt = nome => eventiOk().filter(e => e.proprietario === nome).reduce((s, e) => s + e.punti, 0);
+const puntiMus = (mid, prop) => (prop === undefined ? PT.mus.get(mid) : PT.coppie.get(mid + "|" + prop)) || 0;
+const puntiUt = nome => PT.ut.get(nome) || 0;
 const nomeMus = mid => { const m = MUS.get(mid); return m ? m.nome : "?"; };
 const soprUt = nome => { const u = U(nome); return u && u.soprannome ? u.soprannome : ""; };
 const etichettaUt = nome => soprUt(nome) ? `${nome} (${soprUt(nome)})` : nome;
@@ -221,7 +247,9 @@ function descriviPunteggio(a) {
   return sl.length === 1 ? descriviSlot(a, sl[0]) : sl.map(s => `${s.ruolo}: ${descriviSlot(a, s)}`).join(" | ");
 }
 const descriviBonus = b => `${b.nome} (${sgn(b.valore)}${b.tipo === "percentuale" ? "%" : ""})`;
-function descriviCalcolo(e) {
+// opz.breve: senza il numero di gruppo; opz.senzaRuolo: senza il ruolo (nei dettagli è già accanto al nome)
+function descriviCalcolo(e, opz) {
+  opz = opz || {};
   const p = [];
   if (e.dittatura) p.push("DITTATURA"); else if (e.dettaglio) p.push(e.dettaglio);
   if (((e.bonus || []).length || (e.bonus_auto || []).length) && !e.dittatura) {
@@ -229,14 +257,67 @@ function descriviCalcolo(e) {
     (e.bonus || []).forEach(b => p.push(descriviBonus(b)));
     (e.bonus_auto || []).forEach(b => p.push(descriviBonus(b)));
   }
-  if (e.ruolo) p.push("ruolo " + e.ruolo);
-  if (e.gruppo) p.push("gruppo " + e.gruppo);
+  if (e.ruolo && !opz.senzaRuolo) p.push(e.ruolo === "extra" ? "altro coinvolto" : "ruolo " + e.ruolo);
+  if (e.gruppo && !opz.breve) p.push("gruppo " + e.gruppo);
   return p.join("; ");
 }
 const dataEv = e => e.data_completamento || e.data;
-function eventiRecenti(n, filtro) {
-  const ev = D.eventi.filter(e => !filtro || filtro(e));
+function gruppoEvento(e) {
+  if (!e.gruppo) return [e];
+  const g = GRP.get(e.gruppo);          // indicizzato in indicizza(): niente scansioni per ogni riga
+  return g && g.length ? g : [e];
+}
+function comprimiGruppi(ev) {
+  const princ = new Map();
+  ev.forEach(e => { if (e.gruppo && (!princ.has(e.gruppo) || e.id < princ.get(e.gruppo).id)) princ.set(e.gruppo, e); });
+  const out = [], visti = new Set();
+  ev.forEach(e => {
+    if (!e.gruppo) return out.push(e);
+    if (visti.has(e.gruppo)) return;
+    visti.add(e.gruppo); out.push(princ.get(e.gruppo));
+  });
+  return out;
+}
+const etichettaRuolo = e => (e.ruolo || "") === "extra" ? "altro coinvolto" : (e.ruolo || "");
+function descriviCoinvolti(e) {
+  const altri = gruppoEvento(e).filter(x => x.id !== e.id);
+  if (!altri.length) return "";
+  const pend = altri.filter(x => (x.stato || "ok") === "pending").length;
+  return `+${altri.length} coinvolt${altri.length === 1 ? "o" : "i"}` + (pend ? `, ${pend} in pending` : "");
+}
+// Periodi degli elenchi eventi (stessi codici delle preferenze di fantamusica.py)
+const PERIODI = [["1h", "ultim'ora"], ["3g", "ultimi 3 giorni"], ["7g", "ultima settimana"],
+                 ["30g", "ultimo mese"], ["90g", "ultimi 3 mesi"], ["tutto", "tutta la stagione"]];
+const etichettaPeriodo = p => (PERIODI.find(x => x[0] === p) || PERIODI[3])[1];
+// Le date degli eventi sono scritte nel fuso del gioco (lato Supabase: asta_config.fuso), non in quello
+// del telefono: chi gioca dall'estero deve vedere lo stesso elenco di chi è in Italia.
+const FUSO_GIOCO = "Europe/Rome";
+function oraGioco(d) {
+  try {
+    return new Intl.DateTimeFormat("sv-SE", { timeZone: FUSO_GIOCO, year: "numeric", month: "2-digit",
+      day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(d).replace("T", " ");
+  } catch (e) {                         // browser senza fusi IANA: si usa l'ora del dispositivo
+    const due = x => String(x).padStart(2, "0");
+    return `${d.getFullYear()}-${due(d.getMonth() + 1)}-${due(d.getDate())} ${due(d.getHours())}:${due(d.getMinutes())}`;
+  }
+}
+function inizioPeriodo(p) {
+  if (!p || p === "tutto") return null;
+  const n = parseInt(p, 10), unita = p.slice(-1);
+  if (!n || (unita !== "h" && unita !== "g")) return null;
+  // si sottrae sul calendario, non sull'istante (come fa l'app): così attorno al cambio dell'ora legale
+  // la pagina e l'app mostrano gli stessi eventi. Formato uguale a quello delle date degli eventi.
+  const t = Date.parse(oraGioco(new Date()).replace(" ", "T") + ":00Z") - n * (unita === "h" ? 3600e3 : 86400e3);
+  return new Date(t).toISOString().slice(0, 16).replace("T", " ");
+}
+function filtroPeriodo(p) {
+  const da = inizioPeriodo(p);
+  return da ? (e => dataEv(e) >= da) : null;
+}
+function eventiRecenti(n, filtro, comprimi) {
+  let ev = D.eventi.filter(e => !filtro || filtro(e));
   ev.sort((a, b) => (dataEv(a) < dataEv(b) ? 1 : dataEv(a) > dataEv(b) ? -1 : b.id - a.id));
+  if (comprimi) ev = comprimiGruppi(ev);
   return n ? ev.slice(0, n) : ev;
 }
 const scambiFatti = nome => D.scambi.filter(x => x.stato === "accettato" && (x.da === nome || x.a === nome)).length;
@@ -279,8 +360,9 @@ const ordini = {};
 function ordina(righe, col, desc) {
   const f = col.ord || col.v, pieni = [], vuoti = [];
   righe.forEach(r => { let k = f(r); if (typeof k === "string") k = k.toLowerCase(); (k === null || k === undefined ? vuoti : pieni).push([k, r]); });
-  pieni.sort((a, b) => (typeof a[0] === "string" || typeof b[0] === "string") ? String(a[0]).localeCompare(String(b[0])) : a[0] - b[0]);
-  if (desc) pieni.reverse();
+  const cmp = (a, b) => (typeof a[0] === "string" || typeof b[0] === "string") ? String(a[0]).localeCompare(String(b[0])) : a[0] - b[0];
+  // a parità di valore decide l'ID (es. eventi dello stesso minuto: con "Data ▼" prima i più recenti)
+  pieni.sort((a, b) => { const c = cmp(a, b) || ((a[1].id || 0) - (b[1].id || 0)); return desc ? -c : c; });
   return pieni.concat(vuoti).map(x => x[1]);
 }
 function tabella(id, cols, righe, def, opz) {
@@ -293,7 +375,10 @@ function tabella(id, cols, righe, def, opz) {
     onclick: c.sort === false ? null : () => { ordini[id] = { k: c.k, desc: o.k === c.k ? !o.desc : (c.a === "r") }; (opz.rid || render)(); },
     text: c.t + (c.k === col.k && c.sort !== false ? (o.desc ? " ▼" : " ▲") : "") }));
   const tr = ordinate.map(r => {
-    const riga = h("tr", { class: (opz.io && opz.io(r) ? "io " : "") + (opz.clic ? "cl" : ""), onclick: opz.clic ? () => opz.clic(r) : null },
+    // opz.clic: tutte le righe cliccabili; opz.clicRiga: solo quelle per cui ritorna una funzione
+    const f = opz.clic ? () => opz.clic(r) : (opz.clicRiga ? opz.clicRiga(r) : null);
+    const extra = opz.cls ? (opz.cls(r) || "") : "";
+    const riga = h("tr", { class: (opz.io && opz.io(r) ? "io " : "") + (f ? "cl " : "") + extra, onclick: f },
       cols.map(c => { const v = c.v(r); const x = c.f ? c.f(v, r) : fmt(v); return h("td", { class: c.a === "r" ? "r" : "" }, x); }));
     return riga;
   });
@@ -391,7 +476,8 @@ function modaleMusicista(mid) {
     h("p", null, "Squadra: ", m.proprietario ? `${m.proprietario} (prezzo ${m.prezzo})` : "nessuna", " - Punti: ", h("b", { text: puntiMus(mid) })),
     campi.length ? h("div", null, campi.map(c => h("div", { text: `${c.nome}: ${fmt(valProfilo(m, c))}` }))) : null,
     h("h3", { text: "Eventi" }),
-    tabella("ev_m", colonneEventi(), ev, ["data", true], { vuoto: "Nessun evento.", rid: () => modaleMusicista(mid) }),
+    tabella("ev_m", colonneEventi(), ev, ["data", true], opzEventi({ vuoto: "Nessun evento.", rid: () => modaleMusicista(mid),
+      clicRiga: e => () => modaleEvento(e, () => modaleMusicista(mid)) })),
     h("div", { class: "riga" }, h("button", { class: "n", onclick: chiudiModale, text: "Chiudi" }))));
 }
 function apriModale(nodo) { const m = $("#modale"); m.innerHTML = ""; m.append(nodo); m.style.display = "block"; }
@@ -419,18 +505,48 @@ VISTE.squadra = function (box) {
     ex ? h("p", { class: "dim", text: `Punti maturati da musicisti non più in squadra: ${sgn(ex)}` }) : null,
     h("p", null, h("b", { text: `Totale squadra: ${sgn(tot)} punti` }), cl ? ` - posizione in classifica: ${cl.pos}°` : "")));
   const ev = eventiRecenti(0, e => e.proprietario === nome);
-  box.append(h("div", { class: "card" }, h("h2", { text: "Eventi della squadra" }), tabella("ev_sq", colonneEventi(), ev, ["data", true], { vuoto: "Nessun evento." })));
+  box.append(h("div", { class: "card" }, h("h2", { text: "Eventi della squadra" }),
+    tabella("ev_sq", colonneEventi(), ev, ["data", true], opzEventi({ vuoto: "Nessun evento." }))));
 };
+
+// Ogni riga di un elenco eventi apre i dettagli; quelle con più musicisti hanno lo sfondo giallo.
+const opzEventi = extra => Object.assign({
+  cls: e => e.gruppo ? "grp" : "",
+  clicRiga: e => () => modaleEvento(e),
+}, extra || {});
+
+function modaleEvento(e, torna) {
+  const g = gruppoEvento(e), p = g[0];
+  const tot = g.filter(x => (x.stato || "ok") === "ok").reduce((s, x) => s + x.punti, 0);
+  // per ogni musicista due righe: "nome ruolo + punti", poi "squadra - come è stato calcolato"
+  const blocchi = g.map(x => {
+    const ruolo = etichettaRuolo(x), calcolo = descriviCalcolo(x, { breve: true, senzaRuolo: true });
+    return h("div", { class: "evm" + (x.id === e.id && g.length > 1 ? " qui" : "") },
+      h("div", { class: "evm1" },
+        h("span", { class: "nome", text: nomeMus(x.musicista_id) }),
+        ruolo ? h("span", { class: "ruolo", text: ruolo }) : null,
+        h("span", { class: "pt" }, puntiTxt(x))),
+      h("div", { class: "dim evm2", text: [x.proprietario || "nessuna squadra", calcolo].filter(Boolean).join(" - ") }));
+  });
+  apriModale(h("div", { class: "card" },
+    h("h2", { text: p.azione }),
+    h("p", { class: "dim", text: `${dataEv(p)} - evento #${p.id}` + (p.gruppo ? ` - gruppo ${p.gruppo}` : "")
+      + (p.proposto_da ? ` - proposto da ${p.proposto_da}` : "") }),
+    p.nota ? h("p", null, "Nota: ", p.nota) : null,
+    h("div", null, blocchi),
+    g.length > 1 ? h("p", null, h("b", { text: `Totale evento: ${sgn(tot)} punti` })) : null,
+    h("div", { class: "riga" }, h("button", { class: "n", onclick: torna || chiudiModale, text: torna ? "Indietro" : "Chiudi" }))));
+}
 
 function colonneEventi() {
   return [
     { k: "id", t: "ID", v: e => e.id, a: "r" },
     { k: "data", t: "Data", v: e => dataEv(e) },
-    { k: "mus", t: "Musicista", v: e => nomeMus(e.musicista_id) },
+    { k: "mus", t: "Musicista", v: e => nomeMus(e.musicista_id),
+      f: (v, e) => { const c = descriviCoinvolti(e); return c ? h("span", null, v, h("span", { class: "coinv", text: " " + c })) : v; } },
     { k: "azione", t: "Azione", v: e => e.azione },
     { k: "punti", t: "Punti", v: e => e.punti, a: "r", f: (v, e) => puntiTxt(e), ord: e => e.stato === "pending" ? null : e.punti },
     { k: "sq", t: "Squadra", v: e => e.proprietario },
-    { k: "calc", t: "Calcolo", v: e => descriviCalcolo(e) + (e.proposto_da ? (descriviCalcolo(e) ? "; " : "") + "proposto da " + e.proposto_da : ""), sort: false },
   ];
 }
 
@@ -439,11 +555,14 @@ VISTE.eventi = function (box) {
   const np = eventiPending().length;
   box.append(sottoMenu([["ultimi", "Ultimi eventi"], ["pending", "Pending (" + np + ")"], ["proponi", io.ruolo === "admin" ? "Registra un evento" : "Proponi un evento"]], vista.sub));
   if (vista.sub === "ultimi") {
-    const n = parseInt(ls.get("fm_righe", "15"), 10);
-    const sel = h("select", { onchange: ev => { ls.set("fm_righe", ev.target.value); render(); } },
-      [["15", "ultimi 15"], ["30", "ultimi 30"], ["60", "ultimi 60"], ["0", "tutti"]].map(([v, t]) => h("option", { value: v, selected: Number(v) === n, text: t })));
+    const per = ls.get("fm_periodo", "30g");
+    const sel = h("select", { onchange: ev => { ls.set("fm_periodo", ev.target.value); render(); } },
+      PERIODI.map(([v, t]) => h("option", { value: v, selected: v === per, text: t })));
+    const ev = eventiRecenti(0, filtroPeriodo(per), true);
     box.append(h("div", { class: "card" }, h("h2", { text: "Eventi" }), sel,
-      tabella("ev", colonneEventi(), eventiRecenti(n), ["data", true], { vuoto: "Nessun evento registrato." })));
+      h("p", { class: "dim", text: `${ev.length} eventi (${etichettaPeriodo(per)}). Una riga per evento: toccala per i dettagli e il calcolo. Quelle gialle coinvolgono più musicisti.` }),
+      tabella("ev", colonneEventi(), ev, ["data", true],
+        opzEventi({ vuoto: `Nessun evento: ${etichettaPeriodo(per)}. Scegli un periodo più lungo qui sopra.` }))));
   } else if (vista.sub === "pending") vistaPending(box);
   else vistaProponi(box);
 };
