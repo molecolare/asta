@@ -414,6 +414,13 @@ function statTopMusicisti(k) {
   const top = righe.slice(0, k), sommaTop = top.reduce((s, x) => s + x[1], 0), totale = righe.reduce((s, x) => s + x[1], 0);
   return { top, sommaTop, totale, perc: totale ? 100 * sommaTop / totale : null, k };
 }
+function statPeggioriMusicisti(k) {
+  k = k || 5;
+  const righe = D.musicisti.map(m => [m, puntiMus(m.id)]).sort((a, b) => a[1] - b[1]);
+  const peggio = righe.slice(0, k), sommaPeggio = peggio.reduce((s, x) => s + x[1], 0), totale = righe.reduce((s, x) => s + x[1], 0);
+  const perc = (totale && sommaPeggio < 0 && totale < 0) ? 100 * sommaPeggio / totale : null;
+  return { peggio, sommaPeggio, totale, perc, k };
+}
 function statEfficienzaMercato() {
   return giocatori().map(u => ({ nome: u.nome, speso: speso(u.nome), punti: puntiUt(u.nome) }))
     .filter(r => r.speso > 0).map(r => Object.assign(r, { resa: r.punti / r.speso }))
@@ -971,7 +978,7 @@ VISTE.stat = function (box) {
   vista.sub = vista.sub || "riepilogo";
   box.append(sottoMenu([["riepilogo", "Riepilogo"], ["azioni", "Azioni"], ["squadre", "Squadre a confronto"],
     ["affari", "Affari"], ["buff", "Buff/debuff"], ["top", "Top & distribuzione"],
-    ["mercato", "Efficienza mercato"], ["valore", "Valore vs resa"]], vista.sub));
+    ["peggio", "Chi l'ha visto?"], ["mercato", "Efficienza mercato"], ["valore", "Valore vs resa"]], vista.sub));
   const ev = eventiOk(), s = D.impostazioni;
   if (vista.sub === "riepilogo") {
     const gio = giocatori(), mus = D.musicisti, venduti = mus.filter(m => m.proprietario);
@@ -1037,6 +1044,22 @@ VISTE.stat = function (box) {
       ["Eventi a zero", `${dist.zero_n} (${pct(dist.zero_n, dist.eventi)})`],
       ["Totale punti", sgn(dist.tot_pt)],
     ].map(([a, b]) => h("tr", null, h("td", { text: a }), h("td", { text: String(b) }))))));
+    box.append(c);
+  } else if (vista.sub === "peggio") {
+    const d = statPeggioriMusicisti(5);
+    const c = h("div", { class: "card" }, h("h2", { text: "I 5 musicisti con meno punti" }));
+    if (!d.peggio.length) c.append(h("p", { text: "Nessun musicista." }));
+    else {
+      let testo = `I 5 peggiori hanno totalizzato ${sgn(d.sommaPeggio)} punti sui ${sgn(d.totale)} totali.`;
+      if (d.perc !== null) testo += ` Pesano per il ${d.perc.toFixed(1)}% dei punti negativi del campo.`;
+      c.append(h("p", null, h("b", { text: testo })));
+      c.append(tabella("st_peggio", [
+        { k: "pos", t: "Pos", v: (r) => r.i, a: "r" },
+        { k: "nome", t: "Musicista", v: r => r.m.nome },
+        { k: "squadra", t: "Squadra", v: r => r.m.proprietario || "-" },
+        { k: "p", t: "Punti", v: r => r.p, a: "r", f: sgn },
+      ], d.peggio.map(([m, p], i) => ({ i: i + 1, m, p })), ["p", false]));
+    }
     box.append(c);
   } else if (vista.sub === "mercato") {
     const righe = statEfficienzaMercato();
