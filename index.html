@@ -214,7 +214,15 @@ async function authPost(percorso, corpo, bearer, extraHeaders) {
   if (extraHeaders) Object.assign(headers, extraHeaders);
   const r = await fetch(SUPABASE_URL + percorso, { method: "POST", headers, body: corpo === undefined ? undefined : JSON.stringify(corpo) });
   let d = {}; try { d = await r.json(); } catch (e) {}
-  if (!r.ok) throw new Error(d.msg || d.message || d.error_description || d.error || ("errore " + r.status));
+  if (!r.ok) {
+    let m = d.msg || d.message || d.error_description || d.error || ("errore " + r.status);
+    const codice = String(d.code || d.error_code || "");
+    if (r.status === 429 || /^over_.*rate_limit$/i.test(codice)) {
+      const attesa = parseInt(r.headers.get("retry-after") || "0", 10);
+      m = "Troppe richieste di autenticazione. " + (attesa > 0 ? `Riprova tra ${attesa} secondi.` : "Riprova tra poco.");
+    }
+    throw new Error(m);
+  }
   return d;
 }
 function authAdotta(d, persistente) {
@@ -645,7 +653,7 @@ function modaleMusicista(mid) {
     h("h2", { text: m.nome }),
     m.soprannome ? h("p", { class: "dim", text: "Soprannome: " + m.soprannome }) : null,
     h("p", null, "Squadra: ", m.proprietario ? `${m.proprietario} (prezzo ${m.prezzo})` : "nessuna", " - Punti: ", h("b", { text: puntiMus(mid) })),
-    campi.length ? h("div", null, campi.map(c => valProfilo(m, c) === undefined ? null : h("div", { text: `${c.nome}: ${fmt(valProfilo(m, c))}` }))) : null,
+    campi.length ? h("div", null, campi.map(c => { const v = valProfilo(m, c); return (v === undefined || v === null || v === "") ? null : h("div", { text: `${c.nome}: ${fmt(v)}` }); })) : null,
     buffs.length ? h("div", null, h("h3", { text: "Buff / debuff attivi" }), buffs.map(b => h("div", { class: "dim", text: descriviBonusEsteso(b) }))) : null,
     h("h3", { text: "Eventi" }),
     tabella("ev_m", colonneEventi(), ev, ["data", true], opzEventi({ vuoto: "Nessun evento.", rid: () => modaleMusicista(mid),
@@ -667,7 +675,7 @@ VISTE.squadra = function (box) {
   const cl = classificaGiocatori().find(x => x.nome === nome);
   box.append(h("div", { class: "card" }, h("h2", { text: "Squadra" }), sel,
     h("p", null, `Crediti residui ${crediti(nome)}/${s.budget_iniziale} - musicisti ${r.length}/${s.musicisti_per_squadra}`),
-    u && campiG.length ? h("div", { class: "dim" }, campiG.map(c => valProfilo(u, c) === undefined ? null : h("div", { text: `${c.nome}: ${fmt(valProfilo(u, c))}` }))) : null,
+    u && campiG.length ? h("div", { class: "dim" }, campiG.map(c => { const v = valProfilo(u, c); return (v === undefined || v === null || v === "") ? null : h("div", { text: `${c.nome}: ${fmt(v)}` }); })) : null,
     buffsG.length ? h("div", null, h("h3", { text: "Buff / debuff attivi" }), buffsG.map(b => h("div", { class: "dim", text: descriviBonusEsteso(b) }))) : null,
     righe.length ? tabella("sq", [
       { k: "nome", t: "Musicista", v: x => x.m.nome, f: (v, x) => cellaMus(x.m) },
@@ -1204,7 +1212,7 @@ VISTE.storico = function (box) {
 // ----- impostazioni -----
 VISTE.impost = function (box) {
   vista.sub = vista.sub || "pref";
-  box.append(sottoMenu([["pref", "Preferenze"], ["sopr", "Soprannomi musicisti"], ["stag", "Impostazioni stagione"]].concat(io.ruolo === "admin" ? [["codici", "Accessi giocatori"], ["adminauth", "Amministratori"]] : []), vista.sub));
+  box.append(sottoMenu([["pref", "Preferenze"], ["sopr", "Soprannomi musicisti"], ["stag", "Impostazioni stagione"]].concat(io.ruolo === "admin" ? [["codici", "Accessi giocatori"], ["adminauth", "Amministratori"], ["audit", "Audit log"]] : []), vista.sub));
   if (vista.sub === "codici" && io.ruolo === "admin") {
     const cod = S.codici || {}, stati = S.accessi || [], url = location.href.split("#")[0].split("?")[0];
     const testo = "FantaBanda: " + url + "\n" + Object.entries(cod).map(([n, c]) => `${n}: ${c.slice(0,4)}-${c.slice(4)}`).join("\n");
@@ -1236,6 +1244,15 @@ VISTE.impost = function (box) {
         esito.textContent = "..."; try { await invitaAdmin(email.value.trim(), esito); disegnaAdminAuth(); } catch (e) { esito.className="esito err"; esito.textContent=e.message; }
       }})), esito, h("div", { id: "admin-auth-elenco" }));
     box.append(card); disegnaAdminAuth(); return;
+  }
+  if (vista.sub === "audit" && io.ruolo === "admin") {
+    const root = h("div", { id: "audit-elenco" });
+    box.append(h("div", { class: "card" },
+      h("h2", { text: "Audit log amministrativo" }),
+      h("p", { class: "dim", text: "Storico server-side delle modifiche amministrative. Password e codici di accesso non vengono salvati nel log." }),
+      h("div", { class: "riga" }, h("button", { class: "n auto", text: "Aggiorna", onclick: () => disegnaAudit() })),
+      root));
+    disegnaAudit(); return;
   }
   if (vista.sub === "pref") {
     const sop = h("input", { maxlength: 20, value: (S.prefs && S.prefs.soprannome) || "", placeholder: "soprannome (max 20 caratteri)", oninput: () => sporco = true });
@@ -1274,6 +1291,36 @@ async function disegnaAdminAuth() {
     root.append(h("h3", { text: "Admin attivi" }), (r.admin || []).length ? h("ul", { class: "lista" }, (r.admin || []).map(a => h("li", null, h("span", { text: a.email || a.id })))) : h("p", { class: "dim", text: "Nessuno." }));
     root.append(h("h3", { text: "Inviti in attesa" }), (r.inviti || []).length ? h("ul", { class: "lista" }, (r.inviti || []).map(i => h("li", null, h("span", { text: i.email }), h("button", { class: "n picc", text: "Revoca", onclick: async () => { await rpc("fm_auth_revoca_invito_admin", { p_email: i.email }); disegnaAdminAuth(); } })))) : h("p", { class: "dim", text: "Nessun invito in attesa." }));
   } catch (e) { root.append(h("p", { class: "esito err", text: e.message })); }
+}
+
+let auditCache = [];
+async function disegnaAudit(primaId=null) {
+  const root = $("#audit-elenco"); if (!root) return;
+  if (primaId === null) { auditCache = []; root.innerHTML = ""; }
+  const attesa = h("p", { class: "dim", text: "Caricamento..." }); root.append(attesa);
+  try {
+    const par = { p_admin: null, p_limite: 100 };
+    if (primaId !== null) par.p_prima_id = primaId;
+    const r = await rpc("fm_audit_elenco", par);
+    if (!r.ok) throw new Error(r.errore || "Errore");
+    attesa.remove();
+    const nuove = r.righe || []; auditCache = auditCache.concat(nuove);
+    root.innerHTML = "";
+    if (!auditCache.length) return root.append(h("p", { class: "dim", text: "Nessuna voce nel log." }));
+    auditCache.forEach(a => {
+      let quando = a.creato || "";
+      try { quando = new Date(a.creato).toLocaleString(); } catch (_) {}
+      const dett = a.dettagli && Object.keys(a.dettagli).length
+        ? h("details", null, h("summary", { text: "Dettagli" }), h("pre", { text: JSON.stringify(a.dettagli, null, 2) })) : null;
+      root.append(h("div", { class: "card" },
+        h("div", { class: "riga" }, h("b", { text: a.azione || "MODIFICA" }), h("span", { class: "dim", text: quando })),
+        h("p", { text: a.riepilogo || "" }),
+        h("p", { class: "dim", text: `${a.actor_nome || "?"} // ${a.fonte || ""}${a.entita_tipo ? " // " + a.entita_tipo + (a.entita_id ? " #" + a.entita_id : "") : ""}` }),
+        dett));
+    });
+    if (nuove.length >= 100 && auditCache.length)
+      root.append(h("div", { class: "riga" }, h("button", { class: "n auto", text: "Carica 100 precedenti", onclick: () => disegnaAudit(auditCache[auditCache.length - 1].id) })));
+  } catch (e) { attesa.remove(); if (primaId === null) root.innerHTML = ""; root.append(h("p", { class: "esito err", text: e.message })); }
 }
 
 function copia(testo) {
