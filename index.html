@@ -85,9 +85,11 @@
   #modale { display: none; position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,.7); overflow: auto; padding: 14px; }
   #modale .card { max-width: 720px; margin: 20px auto; }
   .tag { font-size: .75em; border: 1px solid var(--accent2); color: var(--accent2); padding: 1px 5px; margin-left: 6px; }
+  .tag.dup { border-color: var(--giallo); color: var(--giallo); }
   .badge { background: var(--accent2); color: var(--bg1); border-radius: 9px; padding: 0 6px; font-size: .8em; margin-left: 4px; }
   .nascosto { display: none !important; }
   .blocco { border: 1px dashed rgba(255,255,255,.25); padding: 10px; margin: 10px 0; }
+  .blocco.dup { border-color: var(--giallo); background: rgba(255,208,64,.08); }
 </style>
 </head>
 <body data-tema="verde" data-scala="1">
@@ -212,6 +214,12 @@ const speso = nome => rosa(nome).reduce((s, m) => s + m.prezzo, 0);
 const crediti = nome => { const u = U(nome); return D.impostazioni.budget_iniziale - speso(nome) + (u ? (u.saldo || 0) : 0); };
 const eventiOk = () => D.eventi.filter(e => (e.stato || "ok") === "ok");
 const eventiPending = () => D.eventi.filter(e => e.stato === "pending");
+const admin = () => io && io.ruolo === "admin";
+// Le proposte segnalate come doppione restano nei dati ma, per i giocatori, non compaiono in nessun
+// elenco: solo l'admin le vede (nel pending), così può confermarle o rifiutarle.
+const dupNascosto = e => e.duplicato && e.stato === "pending" && !admin();
+const pendingVisibili = () => eventiPending().filter(e => !dupNascosto(e));
+const nascondiDup = ev => admin() ? ev : ev.filter(e => !dupNascosto(e));
 const eventiAutoChiusi = () => D.eventi.filter(e => e.stato === "ok" && e.chiusura_automatica_voti);
 function aventiVoto(e) {
   const snap = Array.isArray(e.aventi_diritto_voto) ? e.aventi_diritto_voto.filter(Boolean) : [];
@@ -375,6 +383,52 @@ function classificaCumulativa() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Statistiche avanzate (copia in JS delle funzioni pure di fantamusica_core.py)
+// ---------------------------------------------------------------------------------------------
+function statPerAzione() {
+  const agg = {};
+  eventiOk().forEach(e => { const c = agg[e.azione] || (agg[e.azione] = [0, 0]); c[0]++; c[1] += e.punti; });
+  return Object.entries(agg).map(([nome, c]) => ({ nome, volte: c[0], punti: c[1], media: c[1] / c[0] }))
+    .sort((a, b) => b.volte - a.volte || a.nome.toLowerCase().localeCompare(b.nome.toLowerCase()));
+}
+function statDistribuzione() {
+  const ev = eventiOk(), pos = ev.filter(e => e.punti > 0), neg = ev.filter(e => e.punti < 0);
+  return { eventi: ev.length, pos_n: pos.length, neg_n: neg.length, zero_n: ev.length - pos.length - neg.length,
+    pos_pt: pos.reduce((s, e) => s + e.punti, 0), neg_pt: neg.reduce((s, e) => s + e.punti, 0),
+    tot_pt: ev.reduce((s, e) => s + e.punti, 0) };
+}
+function statImpattoBonus() {
+  let eventi = 0, conEffetto = 0, su = 0, giu = 0;
+  eventiOk().forEach(e => {
+    if (e.dittatura || e.base === null || e.base === undefined) return;
+    if (!(e.bonus || []).length && !(e.bonus_auto || []).length) return;
+    eventi++; const d = e.punti - e.base;
+    if (d > 0) su += d; else if (d < 0) giu += d;
+    if (d) conEffetto++;
+  });
+  return { eventi, conEffetto, su, giu, netto: su + giu };
+}
+function statTopMusicisti(k) {
+  k = k || 5;
+  const righe = D.musicisti.map(m => [m, puntiMus(m.id)]).sort((a, b) => b[1] - a[1]);
+  const top = righe.slice(0, k), sommaTop = top.reduce((s, x) => s + x[1], 0), totale = righe.reduce((s, x) => s + x[1], 0);
+  return { top, sommaTop, totale, perc: totale ? 100 * sommaTop / totale : null, k };
+}
+function statEfficienzaMercato() {
+  return giocatori().map(u => ({ nome: u.nome, speso: speso(u.nome), punti: puntiUt(u.nome) }))
+    .filter(r => r.speso > 0).map(r => Object.assign(r, { resa: r.punti / r.speso }))
+    .sort((a, b) => b.resa - a.resa || a.nome.toLowerCase().localeCompare(b.nome.toLowerCase()));
+}
+function statValoreRendimento() {
+  const comprati = D.musicisti.filter(m => m.proprietario && m.prezzo > 0).map(m => ({ m, punti: puntiMus(m.id, m.proprietario) }));
+  const spesoTot = comprati.reduce((s, x) => s + x.m.prezzo, 0), puntiTot = comprati.reduce((s, x) => s + x.punti, 0);
+  const resaMedia = spesoTot ? puntiTot / spesoTot : 0;
+  const righe = comprati.map(x => { const atteso = Math.round(x.m.prezzo * resaMedia); return { m: x.m, prezzo: x.m.prezzo, punti: x.punti, atteso, delta: x.punti - atteso }; })
+    .sort((a, b) => b.delta - a.delta);
+  return { resaMedia, righe };
+}
+
+// ---------------------------------------------------------------------------------------------
 // Tabelle ordinabili
 // ---------------------------------------------------------------------------------------------
 const ordini = {};
@@ -429,7 +483,7 @@ function sottoMenu(voci, corrente, f) {
 function disegnaNav() {
   const nav = $("#nav"); nav.innerHTML = "";
   TABS.forEach(([k, t]) => nav.append(h("button", { class: "n picc" + (vista.tab === k ? " on" : ""), onclick: () => apri(k), text: t },
-    k === "eventi" && D && eventiPending().length ? h("span", { class: "badge", text: eventiPending().length }) : null,
+    k === "eventi" && D && pendingVisibili().length ? h("span", { class: "badge", text: pendingVisibili().length }) : null,
     k === "mercato" && D && io ? (n => n ? h("span", { class: "badge", text: n }) : null)(D.scambi.filter(x => x.stato === "proposto" && x.a === io.nome).length) : null)));
 }
 function render() {
@@ -489,7 +543,7 @@ VISTE.classifica = function (box) {
 
 function modaleMusicista(mid) {
   const m = MUS.get(mid); if (!m) return;
-  const ev = eventiRecenti(0, e => e.musicista_id === mid);
+  const ev = nascondiDup(eventiRecenti(0, e => e.musicista_id === mid));
   const campi = campiPer("musicisti"), buffs = buffMusicista(m);
   apriModale(h("div", { class: "card" },
     h("h2", { text: m.nome }),
@@ -529,7 +583,7 @@ VISTE.squadra = function (box) {
     ], righe, ["punti", true], { clic: x => modaleMusicista(x.m.id) }) : h("p", { text: "Nessun musicista in squadra." }),
     ex ? h("p", { class: "dim", text: `Punti maturati da musicisti non più in squadra: ${sgn(ex)}` }) : null,
     h("p", null, h("b", { text: `Totale squadra: ${sgn(tot)} punti` }), cl ? ` - posizione in classifica: ${cl.pos}°` : "")));
-  const ev = eventiRecenti(0, e => e.proprietario === nome);
+  const ev = nascondiDup(eventiRecenti(0, e => e.proprietario === nome));
   box.append(h("div", { class: "card" }, h("h2", { text: "Eventi della squadra" }),
     tabella("ev_sq", colonneEventi(), ev, ["data", true], opzEventi({ vuoto: "Nessun evento." }))));
 };
@@ -559,6 +613,7 @@ function modaleEvento(e, torna) {
     h("h2", { text: p.azione }),
     h("p", { class: "dim", text: `${dataEv(p)} - evento #${p.id}` + (p.gruppo ? ` - gruppo ${p.gruppo}` : "")
       + (p.proposto_da ? ` - proposto da ${p.proposto_da}` : "") }),
+    admin() && p.duplicato ? h("p", { class: "dim", style: "color:var(--giallo)", text: "Segnalato come probabile doppione: visibile solo a te (admin)." }) : null,
     p.nota ? h("p", null, "Nota: ", p.nota) : null,
     h("div", null, blocchi),
     g.length > 1 ? h("p", null, h("b", { text: `Totale evento: ${sgn(tot)} punti` })) : null,
@@ -571,7 +626,7 @@ function colonneEventi() {
     { k: "data", t: "Data", v: e => dataEv(e) },
     { k: "mus", t: "Musicista", v: e => nomeMus(e.musicista_id),
       f: (v, e) => { const c = descriviCoinvolti(e); return c ? h("span", null, v, h("span", { class: "coinv", text: " " + c })) : v; } },
-    { k: "azione", t: "Azione", v: e => e.azione },
+    { k: "azione", t: "Azione", v: e => e.azione, f: (v, e) => admin() && e.duplicato ? v + " *" : v },
     { k: "punti", t: "Punti", v: e => e.punti, a: "r", f: (v, e) => puntiTxt(e), ord: e => e.stato === "pending" ? null : e.punti },
     { k: "sq", t: "Squadra", v: e => e.proprietario },
   ];
@@ -580,7 +635,7 @@ function colonneEventi() {
 VISTE.eventi = function (box) {
   vista.sub = vista.sub || "ultimi";
   if (vista.sub === "auto" && io.ruolo !== "admin") vista.sub = "ultimi";
-  const np = eventiPending().length, na = eventiAutoChiusi().length;
+  const np = pendingVisibili().length, na = eventiAutoChiusi().length;
   const menu = [["ultimi", "Ultimi eventi"], ["pending", "Pending (" + np + ")"]];
   if (io.ruolo === "admin") menu.push(["auto", "Auto-chiusi voti (" + na + ")"]);
   menu.push(["proponi", io.ruolo === "admin" ? "Registra un evento" : "Proponi un evento"]);
@@ -589,7 +644,7 @@ VISTE.eventi = function (box) {
     const per = ls.get("fm_periodo", "30g");
     const sel = h("select", { onchange: ev => { ls.set("fm_periodo", ev.target.value); render(); } },
       PERIODI.map(([v, t]) => h("option", { value: v, selected: v === per, text: t })));
-    const ev = eventiRecenti(0, filtroPeriodo(per), true);
+    const ev = nascondiDup(eventiRecenti(0, filtroPeriodo(per), true));
     box.append(h("div", { class: "card" }, h("h2", { text: "Eventi" }), sel,
       h("p", { class: "dim", text: `${ev.length} eventi (${etichettaPeriodo(per)}). Una riga per evento: toccala per i dettagli e il calcolo. Quelle gialle coinvolgono più musicisti.` }),
       tabella("ev", colonneEventi(), ev, ["data", true],
@@ -608,9 +663,11 @@ function vistaAutoChiusi(box) {
 }
 
 function vistaPending(box) {
-  const pend = eventiPending();
+  const pend = pendingVisibili();
   const c = h("div", { class: "card" }, h("h2", { text: "Eventi in pending" }),
     h("p", { class: "dim", text: "Nei sondaggi il voto è segreto: si vede solo quante persone hanno votato. Quando hanno votato tutti gli aventi diritto il punteggio viene calcolato e l'evento si chiude automaticamente." }));
+  if (admin() && eventiPending().some(e => e.duplicato))
+    c.append(h("p", { class: "dim", style: "color:var(--giallo)", text: "I blocchi gialli sono proposte segnalate come probabili doppioni (stesso musicista e azione di un'altra proposta): le vedi solo tu. Confermale se sono corrette o rifiutale." }));
   if (!pend.length) c.append(h("p", { text: "Nessun evento in pending." }));
   pend.sort((a, b) => b.id - a.id).forEach(e => {
     const az = D.azioni.find(a => a.id === e.azione_id);
@@ -618,10 +675,11 @@ function vistaPending(box) {
     const [lo, hi] = e.fascia || (az ? [az.min, az.max] : [1, 10]);
     const aventi = aventiVoto(e), [fatti, necessari] = progressoVoti(e);
     const gia = (e.votanti || []).includes(io.nome), puo = aventi.includes(io.nome);
-    const blocco = h("div", { class: "blocco" },
+    const blocco = h("div", { class: "blocco" + (e.duplicato ? " dup" : "") },
       h("div", null, h("b", { text: `#${e.id} ${nomeMus(e.musicista_id)} - ${e.azione}` }),
-        h("span", { class: "tag", text: e.da_approvare && e.proposta_base != null ? "DA CONFERMARE" : (sond ? `${fatti}/${necessari} VOTI` : "PENDING") })),
+        h("span", { class: "tag" + (e.duplicato ? " dup" : ""), text: e.duplicato ? "DOPPIONE?" : (e.da_approvare && e.proposta_base != null ? "DA CONFERMARE" : (sond ? `${fatti}/${necessari} VOTI` : "PENDING")) })),
       h("div", { class: "dim", text: `${e.data}${e.proposto_da ? " | proposto da " + e.proposto_da : ""} | squadra: ${fmt(e.proprietario)}` }));
+    if (e.duplicato) blocco.append(h("div", { class: "dim", style: "color:var(--giallo)", text: "Probabile doppione di un'altra proposta già in pending con lo stesso musicista e la stessa azione. Visibile solo all'admin." }));
     if (e.proposta_base != null) blocco.append(h("div", null, `Punteggio proposto: ${sgn(calcolaPunti(e.proposta_base, e.bonus || []))}`, e.dettaglio ? ` (${e.dettaglio})` : ""));
     if (sond) {
       blocco.append(h("div", null, `Voto segreto: ${fatti}/${necessari} giocatori hanno votato.`));
@@ -911,7 +969,9 @@ function vistaNuovaProposta(box) {
 // ----- statistiche -----
 VISTE.stat = function (box) {
   vista.sub = vista.sub || "riepilogo";
-  box.append(sottoMenu([["riepilogo", "Riepilogo"], ["azioni", "Azioni"], ["squadre", "Squadre a confronto"], ["affari", "Affari"]], vista.sub));
+  box.append(sottoMenu([["riepilogo", "Riepilogo"], ["azioni", "Azioni"], ["squadre", "Squadre a confronto"],
+    ["affari", "Affari"], ["buff", "Buff/debuff"], ["top", "Top & distribuzione"],
+    ["mercato", "Efficienza mercato"], ["valore", "Valore vs resa"]], vista.sub));
   const ev = eventiOk(), s = D.impostazioni;
   if (vista.sub === "riepilogo") {
     const gio = giocatori(), mus = D.musicisti, venduti = mus.filter(m => m.proprietario);
@@ -919,7 +979,7 @@ VISTE.stat = function (box) {
     const totP = ev.reduce((a, e) => a + e.punti, 0), pos = ev.filter(e => e.punti > 0).length, neg = ev.filter(e => e.punti < 0).length;
     const senza = ev.filter(e => !e.proprietario).reduce((a, e) => a + e.punti, 0);
     const righe = [["Giocatori", gio.length], ["Musicisti acquistati", `${venduti.length}/${mus.length} (${pct(venduti.length, mus.length)})`],
-      ["Crediti spesi in asta", `${spesoTot}/${budgetTot} (${pct(spesoTot, budgetTot)})`], ["Eventi registrati", `${ev.length} (in pending: ${eventiPending().length})`]];
+      ["Crediti spesi in asta", `${spesoTot}/${budgetTot} (${pct(spesoTot, budgetTot)})`], ["Eventi registrati", `${ev.length} (in pending: ${pendingVisibili().length})`]];
     if (ev.length) {
       const ditt = ev.filter(e => e.dittatura).length, conB = ev.filter(e => (e.bonus || []).length).length;
       const mig = ev.reduce((a, e) => e.punti > a.punti ? e : a), peg = ev.reduce((a, e) => e.punti < a.punti ? e : a);
@@ -931,12 +991,12 @@ VISTE.stat = function (box) {
     }
     box.append(h("div", { class: "card" }, h("h2", { text: "Riepilogo - " + s.stagione }), h("table", null, h("tbody", null, righe.map(([a, b]) => h("tr", null, h("td", { text: a }), h("td", { text: String(b) })))))));
   } else if (vista.sub === "azioni") {
-    const agg = {}; ev.forEach(e => { const c = agg[e.azione] || (agg[e.azione] = [0, 0]); c[0]++; c[1] += e.punti; });
-    const righe = Object.entries(agg).map(([n, c]) => ({ n, v: c[0], t: c[1] }));
-    box.append(h("div", { class: "card" }, h("h2", { text: "Azioni più frequenti" }), tabella("st_az", [
-      { k: "n", t: "Azione", v: r => r.n }, { k: "v", t: "Volte", v: r => r.v, a: "r" },
-      { k: "p", t: "% eventi", v: r => r.v, a: "r", sort: false, f: v => pct(v, ev.length) },
-      { k: "t", t: "Punti tot.", v: r => r.t, a: "r", f: v => sgn(v) }, { k: "m", t: "Media", v: r => r.t / r.v, a: "r", f: v => sgn(Math.round(v * 10) / 10) },
+    const righe = statPerAzione();
+    box.append(h("div", { class: "card" }, h("h2", { text: "Azioni più frequenti" }),
+      h("p", { class: "dim", text: "Quante volte si verifica ogni tipo di evento e i punti medi che produce." }), tabella("st_az", [
+      { k: "n", t: "Azione", v: r => r.nome }, { k: "v", t: "Volte", v: r => r.volte, a: "r" },
+      { k: "p", t: "% eventi", v: r => r.volte, a: "r", sort: false, f: v => pct(v, ev.length) },
+      { k: "t", t: "Punti tot.", v: r => r.punti, a: "r", f: v => sgn(v) }, { k: "m", t: "Punti medi", v: r => r.media, a: "r", f: v => sgn(Math.round(v * 10) / 10) },
     ], righe, ["v", true], { vuoto: "Nessun evento registrato." })));
   } else if (vista.sub === "squadre") {
     const cl = classificaGiocatori(), tot = cl.reduce((a, r) => a + r.punti, 0);
@@ -948,13 +1008,58 @@ VISTE.stat = function (box) {
       { k: "resa", t: "Punti/credito", v: r => speso(r.nome) ? r.punti / speso(r.nome) : null, a: "r", f: v => v === null ? "-" : v.toFixed(2) },
       { k: "med", t: "Media/musicista", v: r => rosa(r.nome).length ? r.punti / rosa(r.nome).length : null, a: "r", f: v => v === null ? "-" : v.toFixed(1) },
     ], cl, ["pos", false])));
+  } else if (vista.sub === "buff") {
+    const d = statImpattoBonus();
+    box.append(h("div", { class: "card" }, h("h2", { text: "Impatto dei buff/debuff" }),
+      d.eventi ? h("table", null, h("tbody", null, [
+        ["Eventi con bonus/malus", d.eventi], ["Di cui con effetto ≠ 0", d.conEffetto],
+        ["Punti aggiunti (buff)", sgn(d.su)], ["Punti tolti (debuff)", sgn(d.giu)], ["Effetto netto sui punti", sgn(d.netto)]
+      ].map(([a, b]) => h("tr", null, h("td", { text: a }), h("td", { class: "r", text: String(b) })))))
+      : h("p", { text: "Nessun evento con bonus/malus applicati." }),
+      h("p", { class: "dim", text: "Confronta il punteggio finale con la base: quanto i bonus/malus (classici e automatici) hanno spostato i punti." })));
+  } else if (vista.sub === "top") {
+    const t = statTopMusicisti(5), dist = statDistribuzione();
+    const c = h("div", { class: "card" }, h("h2", { text: "I 5 musicisti migliori" }));
+    if (t.perc === null) c.append(h("p", { text: "Nessun punto assegnato ai musicisti." }));
+    else {
+      c.append(h("p", null, h("b", { text: `I 5 migliori producono ${t.sommaTop} punti su ${t.totale} (${t.perc.toFixed(1)}% del totale).` })));
+      c.append(tabella("st_top", [
+        { k: "pos", t: "Pos", v: (r) => r.i, a: "r" },
+        { k: "nome", t: "Musicista", v: r => r.m.nome },
+        { k: "p", t: "Punti", v: r => r.p, a: "r" },
+        { k: "perc", t: "% sul totale", v: r => r.p, a: "r", sort: false, f: v => pct(v, t.totale) },
+      ], t.top.map(([m, p], i) => ({ i: i + 1, m, p })), ["p", true]));
+    }
+    c.append(h("h3", { text: "Distribuzione positivo / negativo" }));
+    c.append(h("table", null, h("tbody", null, [
+      ["Eventi positivi", `${dist.pos_n} (${pct(dist.pos_n, dist.eventi)}) — ${sgn(dist.pos_pt)} punti`],
+      ["Eventi negativi", `${dist.neg_n} (${pct(dist.neg_n, dist.eventi)}) — ${sgn(dist.neg_pt)} punti`],
+      ["Eventi a zero", `${dist.zero_n} (${pct(dist.zero_n, dist.eventi)})`],
+      ["Totale punti", sgn(dist.tot_pt)],
+    ].map(([a, b]) => h("tr", null, h("td", { text: a }), h("td", { text: String(b) }))))));
+    box.append(c);
+  } else if (vista.sub === "mercato") {
+    const righe = statEfficienzaMercato();
+    box.append(h("div", { class: "card" }, h("h2", { text: "Efficienza nel mercato" }),
+      h("p", { class: "dim", text: "Punti ottenuti per ogni credito speso in rosa: chi ha reso di più rispetto a quanto ha speso." }),
+      tabella("st_merc", [
+        { k: "nome", t: "Giocatore", v: r => r.nome, f: v => linkUt(v) },
+        { k: "sp", t: "Speso", v: r => r.speso, a: "r" },
+        { k: "p", t: "Punti", v: r => r.punti, a: "r" },
+        { k: "resa", t: "Punti/credito", v: r => r.resa, a: "r", f: v => v.toFixed(2) },
+      ], righe, ["resa", true], { vuoto: "Nessun giocatore ha ancora speso crediti." })));
   } else {
-    const righe = D.musicisti.filter(m => m.proprietario && m.prezzo > 0).map(m => ({ m, p: puntiMus(m.id, m.proprietario) }));
-    box.append(h("div", { class: "card" }, h("h2", { text: "Resa dei musicisti (punti per credito speso)" }), tabella("st_aff", [
-      { k: "n", t: "Musicista", v: r => r.m.nome, f: (v, r) => cellaMus(r.m) }, { k: "sq", t: "Squadra", v: r => r.m.proprietario },
-      { k: "pr", t: "Prezzo", v: r => r.m.prezzo, a: "r" }, { k: "p", t: "Punti", v: r => r.p, a: "r" },
-      { k: "resa", t: "Punti/credito", v: r => r.p / r.m.prezzo, a: "r", f: v => v.toFixed(2) },
-    ], righe, ["resa", true], { vuoto: "Nessun musicista acquistato." })));
+    const vr = statValoreRendimento();
+    box.append(h("div", { class: "card" }, h("h2", { text: "Valore d'asta vs rendimento reale" }),
+      h("p", { class: "dim", text: `Resa media del campo: ${vr.resaMedia.toFixed(2)} punti/credito. "Punti attesi" = prezzo × resa media; lo scarto positivo (verde) indica chi ha reso più di quanto è costato.` }),
+      tabella("st_vr", [
+        { k: "nome", t: "Musicista", v: r => r.m.nome, f: (v, r) => cellaMus(r.m) },
+        { k: "sq", t: "Squadra", v: r => r.m.proprietario, f: v => v ? linkUt(v) : "-" },
+        { k: "prezzo", t: "Prezzo", v: r => r.prezzo, a: "r" },
+        { k: "p", t: "Punti reali", v: r => r.punti, a: "r" },
+        { k: "att", t: "Punti attesi", v: r => r.atteso, a: "r" },
+        { k: "delta", t: "Scarto", v: r => r.delta, a: "r", f: v => h("span", { class: v > 0 ? "pos" : v < 0 ? "neg" : "", text: sgn(v) }) },
+      ], vr.righe, ["delta", true], { vuoto: "Nessun musicista acquistato." })));
   }
 };
 
