@@ -112,11 +112,30 @@
 <div id="modale"></div>
 
 <div id="login" class="card">
-  <h2>Accesso</h2>
+  <h2>Accesso giocatore</h2>
   <p class="dim">Scrivi il codice personale che ti ha dato l'admin.</p>
-  <input id="codice" placeholder="CODICE" autocomplete="off" autocapitalize="characters">
+  <input id="codice" placeholder="CODICE GIOCATORE" autocomplete="off" autocapitalize="characters">
   <div class="riga"><button class="n" id="entra">Entra</button></div>
   <div class="esito err" id="loginerr"></div>
+
+  <div class="blocco" style="margin-top:22px">
+    <h2>Accesso amministratore</h2>
+    <p class="dim">L'admin usa un account Supabase Auth. Il vecchio codice admin resta disponibile solo durante la migrazione.</p>
+    <input id="admin-email" type="email" placeholder="EMAIL ADMIN" autocomplete="username">
+    <div style="height:8px"></div>
+    <input id="admin-password" type="password" placeholder="PASSWORD" autocomplete="current-password">
+    <label class="chk"><input id="admin-ricorda" type="checkbox"> Ricordami su questo dispositivo</label>
+    <div class="riga">
+      <button class="n" id="entra-admin">Accedi admin</button>
+      <button class="n" id="crea-admin">Crea account</button>
+    </div>
+    <div class="esito err" id="adminerr"></div>
+    <div id="collega-admin" class="nascosto" style="margin-top:12px">
+      <p class="dim">Account autenticato, ma non ancora autorizzato come admin. Inserisci una sola volta il vecchio codice admin per collegarlo.</p>
+      <input id="admin-migrazione" type="password" placeholder="VECCHIO CODICE ADMIN" autocomplete="off">
+      <div class="riga"><button class="n" id="collega-admin-btn">Collega questo account</button></div>
+    </div>
+  </div>
 </div>
 
 <main id="app" class="nascosto"></main>
@@ -150,11 +169,67 @@ const ls = {
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
   del(k) { try { localStorage.removeItem(k); } catch (e) {} },
 };
-async function chiama(metodo, percorso, corpo) {
+let authSession = null;
+let authPersistente = false;
+const AUTH_KEY = "fm_auth_admin_session";
+
+function authDimentica() {
+  authSession = null; authPersistente = false;
+  try { localStorage.removeItem(AUTH_KEY); } catch (e) {}
+  try { sessionStorage.removeItem(AUTH_KEY); } catch (e) {}
+}
+function authSalva(sessione, persistente) {
+  authSession = sessione || null; authPersistente = !!persistente;
+  try { localStorage.removeItem(AUTH_KEY); sessionStorage.removeItem(AUTH_KEY); } catch (e) {}
+  if (!authSession) return;
+  const testo = JSON.stringify(authSession);
+  try { (authPersistente ? localStorage : sessionStorage).setItem(AUTH_KEY, testo); } catch (e) {}
+}
+function authCarica() {
+  for (const [st, persist] of [[sessionStorage, false], [localStorage, true]]) {
+    try {
+      const x = st.getItem(AUTH_KEY);
+      if (x) { authSession = JSON.parse(x); authPersistente = persist; return authSession; }
+    } catch (e) {}
+  }
+  return null;
+}
+async function authPost(percorso, corpo, bearer) {
+  const headers = { apikey: SUPABASE_KEY, "Content-Type": "application/json" };
+  if (bearer) headers.Authorization = "Bearer " + bearer;
+  const r = await fetch(SUPABASE_URL + percorso, { method: "POST", headers, body: corpo === undefined ? undefined : JSON.stringify(corpo) });
+  let d = {}; try { d = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(d.msg || d.message || d.error_description || d.error || ("errore " + r.status));
+  return d;
+}
+function authAdotta(d, persistente) {
+  if (!d || !d.access_token) return false;
+  if (!d.expires_at && d.expires_in) d.expires_at = Math.floor(Date.now() / 1000) + Number(d.expires_in);
+  authSalva({ access_token: d.access_token, refresh_token: d.refresh_token, expires_at: d.expires_at || 0, user: d.user || null }, persistente);
+  return true;
+}
+async function authRefresh() {
+  if (!authSession || !authSession.refresh_token) return false;
+  try {
+    const d = await authPost("/auth/v1/token?grant_type=refresh_token", { refresh_token: authSession.refresh_token });
+    return authAdotta(d, authPersistente);
+  } catch (e) { authDimentica(); return false; }
+}
+async function authPronto() {
+  if (!authSession) return false;
+  if (!authSession.expires_at || Number(authSession.expires_at) - Math.floor(Date.now() / 1000) < 60) return authRefresh();
+  return true;
+}
+
+async function chiama(metodo, percorso, corpo, riprova) {
+  riprova = riprova !== false;
+  if (authSession) await authPronto();
+  const token = authSession && authSession.access_token ? authSession.access_token : SUPABASE_KEY;
   const r = await fetch(SUPABASE_URL + percorso, {
-    method: metodo, headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + SUPABASE_KEY, "Content-Type": "application/json" },
+    method: metodo, headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + token, "Content-Type": "application/json" },
     body: corpo === undefined ? undefined : JSON.stringify(corpo) });
-  if (!r.ok) { let m = "errore " + r.status; try { m = (await r.json()).message || m; } catch (e) {} throw new Error(m); }
+  if (r.status === 401 && authSession && riprova && await authRefresh()) return chiama(metodo, percorso, corpo, false);
+  if (!r.ok) { let m = "errore " + r.status; try { const d = await r.json(); m = d.message || d.msg || d.error_description || m; } catch (e) {} throw new Error(m); }
   return r.json();
 }
 const rpc = (nome, par) => chiama("POST", "/rest/v1/rpc/" + nome, par || {});
@@ -978,7 +1053,7 @@ VISTE.stat = function (box) {
   vista.sub = vista.sub || "riepilogo";
   box.append(sottoMenu([["riepilogo", "Riepilogo"], ["azioni", "Azioni"], ["squadre", "Squadre a confronto"],
     ["affari", "Affari"], ["buff", "Buff/debuff"], ["top", "Top & distribuzione"],
-    ["peggio", "Chi l'ha visto?"], ["mercato", "Efficienza mercato"], ["valore", "Valore vs resa"]], vista.sub));
+    ["peggio", "Peggiori 5"], ["mercato", "Efficienza mercato"], ["valore", "Valore vs resa"]], vista.sub));
   const ev = eventiOk(), s = D.impostazioni;
   if (vista.sub === "riepilogo") {
     const gio = giocatori(), mus = D.musicisti, venduti = mus.filter(m => m.proprietario);
@@ -1328,14 +1403,9 @@ async function controlla() {
     $("#stato").textContent = "● non raggiungibile"; $("#stato").style.color = "var(--rosso)";
   } finally { occupato = false; }
 }
-async function entra(codice) {
-  $("#loginerr").textContent = "";
-  let r;
-  try { r = await rpc("fm_login", { p_codice: codice }); }
-  catch (e) { $("#loginerr").textContent = "Errore di connessione: " + e.message; return false; }
-  if (!r.ok) { $("#loginerr").textContent = r.errore || "Codice non valido"; return false; }
-  io = { codice, nome: r.nome, ruolo: r.ruolo };
-  ls.set("fm_codice", codice);
+async function completaAccesso(nome, ruolo, codice, viaAuth) {
+  io = { codice: codice || null, nome, ruolo, auth: !!viaAuth };
+  if (viaAuth) ls.del("fm_codice"); else if (codice) ls.set("fm_codice", codice);
   $("#login").classList.add("nascosto"); $("#app").classList.remove("nascosto"); $("#nav").classList.remove("nascosto");
   $("#esci").classList.remove("nascosto");
   if (io.ruolo === "giocatore") $("#btnRich").classList.remove("nascosto");
@@ -1346,11 +1416,94 @@ async function entra(codice) {
   if (io.ruolo === "giocatore") { const ping = () => rpc("asta_ping", { p_codice: io.codice }).catch(() => {}); ping(); timers.push(setInterval(ping, 10000)); }
   return true;
 }
+
+async function entra(codice) {
+  $("#loginerr").textContent = "";
+  let r;
+  try { r = await rpc("fm_login", { p_codice: codice }); }
+  catch (e) { $("#loginerr").textContent = "Errore di connessione: " + e.message; return false; }
+  if (!r.ok) { $("#loginerr").textContent = r.errore || "Codice non valido"; return false; }
+  return completaAccesso(r.nome, r.ruolo, codice, false);
+}
+
+async function verificaAdminAuth() {
+  const r = await rpc("fm_auth_stato");
+  if (!r || !r.autenticato) throw new Error("Sessione Supabase non valida");
+  if (!r.admin) {
+    $("#collega-admin").classList.remove("nascosto");
+    $("#adminerr").textContent = "Account valido ma non ancora collegato come amministratore.";
+    return false;
+  }
+  $("#collega-admin").classList.add("nascosto");
+  $("#adminerr").textContent = "";
+  return completaAccesso("ADMIN", "admin", null, true);
+}
+
+async function entraAdmin() {
+  $("#adminerr").textContent = "";
+  const email = $("#admin-email").value.trim(), password = $("#admin-password").value;
+  if (!email || !password) { $("#adminerr").textContent = "Inserisci email e password."; return false; }
+  try {
+    const d = await authPost("/auth/v1/token?grant_type=password", { email, password });
+    if (!authAdotta(d, $("#admin-ricorda").checked)) throw new Error("Accesso non riuscito");
+    return verificaAdminAuth();
+  } catch (e) { authDimentica(); $("#adminerr").textContent = "Accesso admin non riuscito: " + e.message; return false; }
+}
+
+async function creaAccountAdmin() {
+  $("#adminerr").textContent = "";
+  const email = $("#admin-email").value.trim(), password = $("#admin-password").value;
+  if (!email || password.length < 8) { $("#adminerr").textContent = "Serve un'email valida e una password di almeno 8 caratteri."; return; }
+  try {
+    const d = await authPost("/auth/v1/signup", { email, password });
+    if (d.access_token) {
+      authAdotta(d, $("#admin-ricorda").checked);
+      $("#adminerr").textContent = "Account creato. Ora collegalo una sola volta con il vecchio codice admin.";
+      $("#collega-admin").classList.remove("nascosto");
+    } else {
+      $("#adminerr").textContent = "Account creato. Controlla l'email di conferma, poi torna qui e premi ACCEDI ADMIN.";
+    }
+  } catch (e) { $("#adminerr").textContent = "Creazione account non riuscita: " + e.message; }
+}
+
+async function collegaAdmin() {
+  const vecchio = $("#admin-migrazione").value.trim();
+  if (!vecchio) { $("#adminerr").textContent = "Inserisci il vecchio codice admin."; return; }
+  try {
+    const r = await rpc("fm_auth_collega_admin", { p_admin: vecchio });
+    if (!r.ok) throw new Error(r.errore || "Collegamento rifiutato");
+    $("#admin-migrazione").value = "";
+    await verificaAdminAuth();
+  } catch (e) { $("#adminerr").textContent = "Collegamento non riuscito: " + e.message; }
+}
+
+async function esci() {
+  ls.del("fm_codice");
+  if (authSession && authSession.access_token) {
+    try { await authPost("/auth/v1/logout", {}, authSession.access_token); } catch (e) {}
+  }
+  authDimentica();
+  location.reload();
+}
+
 $("#entra").onclick = () => { beep(660, 80); entra($("#codice").value.trim()); };
 $("#codice").addEventListener("keydown", e => { if (e.key === "Enter") $("#entra").click(); });
-$("#esci").onclick = () => { ls.del("fm_codice"); location.reload(); };
+$("#entra-admin").onclick = () => { beep(660, 80); entraAdmin(); };
+$("#admin-password").addEventListener("keydown", e => { if (e.key === "Enter") $("#entra-admin").click(); });
+$("#crea-admin").onclick = creaAccountAdmin;
+$("#collega-admin-btn").onclick = collegaAdmin;
+$("#esci").onclick = esci;
 $("#modale").addEventListener("click", e => { if (e.target.id === "modale") chiudiModale(); });
-{ const salvato = ls.get("fm_codice", ""); if (salvato) { $("#codice").value = salvato; entra(salvato); } }
+
+(async () => {
+  if (authCarica()) {
+    if (await authPronto()) {
+      try { if (await verificaAdminAuth()) return; } catch (e) { authDimentica(); }
+    }
+  }
+  const salvato = ls.get("fm_codice", "");
+  if (salvato) { $("#codice").value = salvato; entra(salvato); }
+})();
 </script>
 </body>
 </html>
