@@ -113,9 +113,9 @@
 
 <div id="login" class="card">
   <h2>Accesso giocatore</h2>
-  <p class="dim">Scrivi il codice personale che ti ha dato l'admin.</p>
-  <input id="codice" placeholder="CODICE GIOCATORE" autocomplete="off" autocapitalize="characters">
-  <div class="riga"><button class="n" id="entra">Entra</button></div>
+  <p class="dim">Al primo accesso inserisci il codice di associazione dato dall'admin. Poi questo dispositivo ti riconoscerà automaticamente.</p>
+  <input id="codice" placeholder="CODICE DI ASSOCIAZIONE" autocomplete="off" autocapitalize="characters">
+  <div class="riga"><button class="n" id="entra">Associa questo dispositivo</button></div>
   <div class="esito err" id="loginerr"></div>
 
   <div class="blocco" style="margin-top:22px">
@@ -127,8 +127,10 @@
     <label class="chk"><input id="admin-ricorda" type="checkbox"> Ricordami su questo dispositivo</label>
     <div class="riga">
       <button class="n" id="entra-admin">Accedi admin</button>
+      <button class="n" id="magic-admin">Magic link</button>
       <button class="n" id="crea-admin">Crea account</button>
     </div>
+    <p class="dim">I secondi admin possono entrare senza password tramite Magic Link, dopo essere stati invitati da un admin già attivo.</p>
     <div class="esito err" id="adminerr"></div>
     <div id="collega-admin" class="nascosto" style="margin-top:12px">
       <p class="dim">Account autenticato, ma non ancora autorizzato come admin. Inserisci una sola volta il vecchio codice admin per collegarlo.</p>
@@ -171,16 +173,17 @@ const ls = {
 };
 let authSession = null;
 let authPersistente = false;
-const AUTH_KEY = "fm_auth_admin_session";
+const AUTH_KEY = "fm_auth_session";
+const AUTH_KEY_OLD = "fm_auth_admin_session";
 
 function authDimentica() {
   authSession = null; authPersistente = false;
-  try { localStorage.removeItem(AUTH_KEY); } catch (e) {}
-  try { sessionStorage.removeItem(AUTH_KEY); } catch (e) {}
+  try { localStorage.removeItem(AUTH_KEY); localStorage.removeItem(AUTH_KEY_OLD); } catch (e) {}
+  try { sessionStorage.removeItem(AUTH_KEY); sessionStorage.removeItem(AUTH_KEY_OLD); } catch (e) {}
 }
 function authSalva(sessione, persistente) {
   authSession = sessione || null; authPersistente = !!persistente;
-  try { localStorage.removeItem(AUTH_KEY); sessionStorage.removeItem(AUTH_KEY); } catch (e) {}
+  try { localStorage.removeItem(AUTH_KEY); sessionStorage.removeItem(AUTH_KEY); localStorage.removeItem(AUTH_KEY_OLD); sessionStorage.removeItem(AUTH_KEY_OLD); } catch (e) {}
   if (!authSession) return;
   const testo = JSON.stringify(authSession);
   try { (authPersistente ? localStorage : sessionStorage).setItem(AUTH_KEY, testo); } catch (e) {}
@@ -188,15 +191,27 @@ function authSalva(sessione, persistente) {
 function authCarica() {
   for (const [st, persist] of [[sessionStorage, false], [localStorage, true]]) {
     try {
-      const x = st.getItem(AUTH_KEY);
+      let x = st.getItem(AUTH_KEY);
+      if (!x) { x = st.getItem(AUTH_KEY_OLD); if (x) { st.setItem(AUTH_KEY, x); st.removeItem(AUTH_KEY_OLD); } }
       if (x) { authSession = JSON.parse(x); authPersistente = persist; return authSession; }
     } catch (e) {}
   }
   return null;
 }
-async function authPost(percorso, corpo, bearer) {
+function authDaURL() {
+  if (!location.hash || location.hash.indexOf("access_token=") < 0) return false;
+  const p = new URLSearchParams(location.hash.slice(1));
+  const access_token = p.get("access_token"), refresh_token = p.get("refresh_token");
+  if (!access_token || !refresh_token) return false;
+  const expires_in = Number(p.get("expires_in") || 3600);
+  authAdotta({ access_token, refresh_token, expires_in, user: null }, true);
+  history.replaceState(null, "", location.pathname + location.search);
+  return true;
+}
+async function authPost(percorso, corpo, bearer, extraHeaders) {
   const headers = { apikey: SUPABASE_KEY, "Content-Type": "application/json" };
   if (bearer) headers.Authorization = "Bearer " + bearer;
+  if (extraHeaders) Object.assign(headers, extraHeaders);
   const r = await fetch(SUPABASE_URL + percorso, { method: "POST", headers, body: corpo === undefined ? undefined : JSON.stringify(corpo) });
   let d = {}; try { d = await r.json(); } catch (e) {}
   if (!r.ok) throw new Error(d.msg || d.message || d.error_description || d.error || ("errore " + r.status));
@@ -258,7 +273,7 @@ document.body.dataset.scala = ls.get("fm_scala", "1");
 // Dati e regole (copia in JavaScript delle funzioni di sola lettura di fantamusica.py)
 // ---------------------------------------------------------------------------------------------
 let io = null;                       // {codice, nome, ruolo}
-let S = { dati: null, prefs: {}, richieste: [], versione: null, vuoto: false };
+let S = { dati: null, prefs: {}, richieste: [], codici: {}, accessi: [], versione: null, vuoto: false };
 let D = null, MUS = new Map(), GRP = new Map(), PT = { mus: new Map(), ut: new Map(), coppie: new Map() };
 const SINGOLARI = { minuti: "minuto", ore: "ora", giorni: "giorno", secondi: "secondo", settimane: "settimana", mesi: "mese", anni: "anno" };
 
@@ -936,7 +951,7 @@ function vistaProponi(box) {
 function mostraEsito(esitoEl, t, err) { if (esitoEl) { esitoEl.className = "esito " + (err ? "err" : "ok"); esitoEl.textContent = t; } toast(t, err); }
 async function invia(tipo, payload, esitoEl) {
   try {
-    const r = await rpc("fm_invia", { p_codice: io.codice, p_tipo: tipo, p_payload: payload });
+    const r = await rpc("fm_invia", { p_codice: io.codice || null, p_tipo: tipo, p_payload: payload });
     if (!r.ok) { mostraEsito(esitoEl, r.errore || r.messaggio || "Richiesta respinta", true); beep(200, 200); carica().catch(() => {}); return false; }
     sporco = false; await carica().catch(() => {});
     mostraEsito(esitoEl, r.messaggio || "Fatto."); beep(660, 70);
@@ -1190,14 +1205,38 @@ VISTE.storico = function (box) {
 // ----- impostazioni -----
 VISTE.impost = function (box) {
   vista.sub = vista.sub || "pref";
-  box.append(sottoMenu([["pref", "Preferenze"], ["sopr", "Soprannomi musicisti"], ["stag", "Impostazioni stagione"]].concat(io.ruolo === "admin" ? [["codici", "Codici giocatori"]] : []), vista.sub));
+  box.append(sottoMenu([["pref", "Preferenze"], ["sopr", "Soprannomi musicisti"], ["stag", "Impostazioni stagione"]].concat(io.ruolo === "admin" ? [["codici", "Accessi giocatori"], ["adminauth", "Amministratori"]] : []), vista.sub));
   if (vista.sub === "codici" && io.ruolo === "admin") {
-    const cod = S.codici || {}, url = location.href.split("#")[0].split("?")[0];
-    const testo = "FantaBanda: " + url + "\n" + Object.entries(cod).map(([n, c]) => `${n}: ${c}`).join("\n");
-    return box.append(h("div", { class: "card" }, h("h2", { text: "Codici dei giocatori" }),
-      h("p", { class: "dim", text: "Manda a ognuno il suo codice e l'indirizzo di questa pagina. I codici si rigenerano dall'app (GIOCO ONLINE > CODICI DEI GIOCATORI)." }),
-      Object.keys(cod).length ? h("table", null, h("tbody", null, Object.entries(cod).map(([n, c]) => h("tr", null, h("td", { text: n }), h("td", null, h("b", { text: c })))))) : h("p", { text: "Nessun codice." }),
-      h("div", { class: "riga" }, h("button", { class: "n auto", text: "Copia tutto", onclick: () => copia(testo) }))));
+    const cod = S.codici || {}, stati = S.accessi || [], url = location.href.split("#")[0].split("?")[0];
+    const testo = "FantaBanda: " + url + "\n" + Object.entries(cod).map(([n, c]) => `${n}: ${c.slice(0,4)}-${c.slice(4)}`).join("\n");
+    const card = h("div", { class: "card" }, h("h2", { text: "Accessi dei giocatori" }),
+      h("p", { class: "dim", text: "Il codice è un invito monouso: dopo la prima associazione il dispositivo usa la propria sessione. Per un nuovo telefono genera un nuovo codice." }));
+    const tb = h("tbody");
+    stati.forEach(s => {
+      const c = cod[s.nome] || "", stato = s.dispositivi ? `${s.dispositivi} dispositivo/i associato/i` : (s.invito_attivo ? "invito pronto" : "da associare");
+      const az = h("td");
+      az.append(h("button", { class: "n picc", text: "Nuovo codice", onclick: async () => {
+        try { const r = await rpc("fm_auth_rigenera_codice", { p_admin: null, p_nome: s.nome }); if (!r.ok) throw new Error(r.errore); await carica(); toast(`Nuovo codice per ${s.nome}: ${r.codice.slice(0,4)}-${r.codice.slice(4)}`); render(); } catch (e) { toast(e.message, true); }
+      }}));
+      if (s.dispositivi) az.append(" ", h("button", { class: "n picc", text: "Disconnetti", onclick: async () => {
+        if (!confirm(`Disconnettere i dispositivi associati a ${s.nome}? Dovrà usare un nuovo codice.`)) return;
+        const r = await rpc("fm_auth_disconnetti_giocatore", { p_admin: null, p_nome: s.nome });
+        if (!r.ok) return toast(r.errore || "Errore", true); await carica(); render();
+      }}));
+      tb.append(h("tr", null, h("td", { text: s.nome }), h("td", { text: c ? c.slice(0,4)+"-"+c.slice(4) : "—" }), h("td", { text: stato }), az));
+    });
+    card.append(stati.length ? h("div", { class: "tab-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", { text: "Giocatore" }), h("th", { text: "Codice attivo" }), h("th", { text: "Stato" }), h("th", { text: "Azioni" }))), tb)) : h("p", { text: "Nessun giocatore." }),
+      Object.keys(cod).length ? h("div", { class: "riga" }, h("button", { class: "n auto", text: "Copia inviti attivi", onclick: () => copia(testo) })) : null);
+    return box.append(card);
+  }
+  if (vista.sub === "adminauth" && io.ruolo === "admin") {
+    const email = h("input", { type: "email", placeholder: "email del nuovo admin" }), esito = h("div", { class: "esito" });
+    const card = h("div", { class: "card" }, h("h2", { text: "Amministratori" }),
+      h("p", { class: "dim", text: "Invita un secondo admin: riceverà un Magic Link e non dovrà creare né ricordare una password." }),
+      h("div", { class: "riga" }, email, h("button", { class: "n auto", text: "Invita e invia link", onclick: async () => {
+        esito.textContent = "..."; try { await invitaAdmin(email.value.trim(), esito); disegnaAdminAuth(); } catch (e) { esito.className="esito err"; esito.textContent=e.message; }
+      }})), esito, h("div", { id: "admin-auth-elenco" }));
+    box.append(card); disegnaAdminAuth(); return;
   }
   if (vista.sub === "pref") {
     const sop = h("input", { maxlength: 20, value: (S.prefs && S.prefs.soprannome) || "", placeholder: "soprannome (max 20 caratteri)", oninput: () => sporco = true });
@@ -1226,6 +1265,17 @@ VISTE.impost = function (box) {
       ["Scambi consentiti a testa", s.scambi_max === undefined ? 3 : s.scambi_max]].map(([a, b]) => h("tr", null, h("td", { text: a }), h("td", { text: String(b) })))))));
   }
 };
+
+async function disegnaAdminAuth() {
+  const root = $("#admin-auth-elenco"); if (!root) return;
+  root.innerHTML = "";
+  try {
+    const r = await rpc("fm_auth_admin_elenco");
+    if (!r.ok) throw new Error(r.errore || "Errore");
+    root.append(h("h3", { text: "Admin attivi" }), (r.admin || []).length ? h("ul", { class: "lista" }, (r.admin || []).map(a => h("li", null, h("span", { text: a.email || a.id })))) : h("p", { class: "dim", text: "Nessuno." }));
+    root.append(h("h3", { text: "Inviti in attesa" }), (r.inviti || []).length ? h("ul", { class: "lista" }, (r.inviti || []).map(i => h("li", null, h("span", { text: i.email }), h("button", { class: "n picc", text: "Revoca", onclick: async () => { await rpc("fm_auth_revoca_invito_admin", { p_email: i.email }); disegnaAdminAuth(); } })))) : h("p", { class: "dim", text: "Nessun invito in attesa." }));
+  } catch (e) { root.append(h("p", { class: "esito err", text: e.message })); }
+}
 
 function copia(testo) {
   const vecchio = () => { const t = h("textarea", { style: "position:fixed;left:-999px" }); t.value = testo; document.body.append(t); t.select(); try { document.execCommand("copy"); toast("Copiato."); } catch (e) { toast("Copia non riuscita: seleziona il testo a mano", true); } t.remove(); };
@@ -1318,7 +1368,7 @@ function disegnaAsta() {
 async function rilancia(importo) {
   asEsito("...");
   try {
-    const r = await rpc("asta_rilancia", { p_codice: io.codice, p_importo: importo });
+    const r = await rpc("asta_rilancia", { p_codice: io.codice || null, p_importo: importo });
     if (!r.ok) { asEsito(r.errore, true); beep(200, 250); return; }
     asEsito("Offerta di " + importo + " inviata"); const i = $("#as-importo"); if (i) i.value = "";
     caricaAsta().catch(() => {});
@@ -1380,10 +1430,10 @@ async function messaggiNuovi() {
 // ---------------------------------------------------------------------------------------------
 let firma = null, occupato = false, ultimoOk = 0, timers = [];
 async function carica() {
-  const r = await rpc("fm_leggi", { p_codice: io.codice });
+  const r = await rpc("fm_leggi", { p_codice: io.codice || null });
   if (!r.ok) throw new Error(r.errore || "Accesso negato");
   S.vuoto = !!r.vuoto;
-  if (!r.vuoto) { S.dati = r.dati; S.versione = r.versione; S.prefs = r.prefs || {}; S.richieste = r.richieste || []; S.codici = r.codici || null; indicizza(); notificaRichieste(); }
+  if (!r.vuoto) { S.dati = r.dati; S.versione = r.versione; S.prefs = r.prefs || {}; S.richieste = r.richieste || []; S.codici = r.codici || {}; S.accessi = r.accessi || []; indicizza(); notificaRichieste(); }
   if (!sporco && !(vista.tab === "asta" && $("#as-root"))) render(); else disegnaNav();
   ultimoOk = Date.now();
 }
@@ -1413,30 +1463,56 @@ async function completaAccesso(nome, ruolo, codice, viaAuth) {
   try { await carica(); } catch (e) { $("#app").append(h("div", { class: "card esito err", text: "Errore: " + e.message })); }
   try { const m = await rpc("fm_versione"); ultimoM = m.m; firma = `${m.v}|${m.n}|${m.e}`; controlla.a = m.a; } catch (e) {}
   timers.push(setInterval(controlla, 2500));
-  if (io.ruolo === "giocatore") { const ping = () => rpc("asta_ping", { p_codice: io.codice }).catch(() => {}); ping(); timers.push(setInterval(ping, 10000)); }
+  if (io.ruolo === "giocatore") { const ping = () => rpc("asta_ping", { p_codice: io.codice || null }).catch(() => {}); ping(); timers.push(setInterval(ping, 10000)); }
   return true;
+}
+
+async function statoAuth() {
+  if (!authSession || !await authPronto()) return null;
+  return rpc("fm_auth_stato");
 }
 
 async function entra(codice) {
   $("#loginerr").textContent = "";
-  let r;
-  try { r = await rpc("fm_login", { p_codice: codice }); }
-  catch (e) { $("#loginerr").textContent = "Errore di connessione: " + e.message; return false; }
-  if (!r.ok) { $("#loginerr").textContent = r.errore || "Codice non valido"; return false; }
-  return completaAccesso(r.nome, r.ruolo, codice, false);
-}
-
-async function verificaAdminAuth() {
-  const r = await rpc("fm_auth_stato");
-  if (!r || !r.autenticato) throw new Error("Sessione Supabase non valida");
-  if (!r.admin) {
-    $("#collega-admin").classList.remove("nascosto");
-    $("#adminerr").textContent = "Account valido ma non ancora collegato come amministratore.";
+  codice = String(codice || "").trim();
+  if (!codice) { $("#loginerr").textContent = "Inserisci il codice di associazione."; return false; }
+  try {
+    // Crea una vera sessione Auth anonima per questo dispositivo. Il codice viene usato una sola volta.
+    authDimentica();
+    const d = await authPost("/auth/v1/signup", { data: { tipo: "fantabanda_giocatore" } });
+    if (!authAdotta(d, true)) throw new Error("Supabase non ha creato la sessione dispositivo");
+    const r = await rpc("fm_auth_associa_giocatore", { p_codice: codice });
+    if (!r.ok) throw new Error(r.errore || "Associazione rifiutata");
+    ls.del("fm_codice");
+    return completaAccesso(r.nome, "giocatore", null, true);
+  } catch (e) {
+    authDimentica();
+    let msg = e.message || String(e);
+    if (/anonymous_provider_disabled/i.test(msg)) msg = "L'admin deve abilitare Anonymous Sign-Ins in Supabase Auth.";
+    $("#loginerr").textContent = "Associazione non riuscita: " + msg;
     return false;
   }
-  $("#collega-admin").classList.add("nascosto");
-  $("#adminerr").textContent = "";
-  return completaAccesso("ADMIN", "admin", null, true);
+}
+
+async function verificaAuth() {
+  const r = await statoAuth();
+  if (!r || !r.autenticato) throw new Error("Sessione Supabase non valida");
+  if (r.admin) {
+    $("#collega-admin").classList.add("nascosto");
+    $("#adminerr").textContent = "";
+    return completaAccesso("ADMIN", "admin", null, true);
+  }
+  if (r.giocatore && r.nome) return completaAccesso(r.nome, "giocatore", null, true);
+  // Un account email arrivato da Magic Link può riscattare automaticamente un invito admin.
+  if (!r.anonimo) {
+    try {
+      const c = await rpc("fm_auth_riscatta_invito_admin");
+      if (c && c.ok && c.admin) return completaAccesso("ADMIN", "admin", null, true);
+    } catch (e) {}
+  }
+  $("#collega-admin").classList.remove("nascosto");
+  $("#adminerr").textContent = "Account valido ma non ancora autorizzato come amministratore.";
+  return false;
 }
 
 async function entraAdmin() {
@@ -1446,7 +1522,7 @@ async function entraAdmin() {
   try {
     const d = await authPost("/auth/v1/token?grant_type=password", { email, password });
     if (!authAdotta(d, $("#admin-ricorda").checked)) throw new Error("Accesso non riuscito");
-    return verificaAdminAuth();
+    return verificaAuth();
   } catch (e) { authDimentica(); $("#adminerr").textContent = "Accesso admin non riuscito: " + e.message; return false; }
 }
 
@@ -1466,6 +1542,28 @@ async function creaAccountAdmin() {
   } catch (e) { $("#adminerr").textContent = "Creazione account non riuscita: " + e.message; }
 }
 
+async function inviaMagicLink(email, esitoEl) {
+  email = String(email || "").trim();
+  const out = esitoEl || $("#adminerr");
+  if (!email) { if (out) out.textContent = "Inserisci l'email."; return false; }
+  try {
+    const redirect = location.origin + location.pathname;
+    await authPost("/auth/v1/otp", { email, data: {}, create_user: true }, null,
+      { "x-supabase-redirect-to": redirect });
+    if (out) { out.className = "esito ok"; out.textContent = "Magic link inviato a " + email + "."; }
+    return true;
+  } catch (e) {
+    if (out) { out.className = "esito err"; out.textContent = "Magic link non inviato: " + e.message; }
+    return false;
+  }
+}
+
+async function invitaAdmin(email, esitoEl) {
+  const r = await rpc("fm_auth_invita_admin", { p_email: email });
+  if (!r.ok) throw new Error(r.errore || "Invito non riuscito");
+  await inviaMagicLink(r.email || email, esitoEl);
+}
+
 async function collegaAdmin() {
   const vecchio = $("#admin-migrazione").value.trim();
   if (!vecchio) { $("#adminerr").textContent = "Inserisci il vecchio codice admin."; return; }
@@ -1473,7 +1571,7 @@ async function collegaAdmin() {
     const r = await rpc("fm_auth_collega_admin", { p_admin: vecchio });
     if (!r.ok) throw new Error(r.errore || "Collegamento rifiutato");
     $("#admin-migrazione").value = "";
-    await verificaAdminAuth();
+    await verificaAuth();
   } catch (e) { $("#adminerr").textContent = "Collegamento non riuscito: " + e.message; }
 }
 
@@ -1491,16 +1589,19 @@ $("#codice").addEventListener("keydown", e => { if (e.key === "Enter") $("#entra
 $("#entra-admin").onclick = () => { beep(660, 80); entraAdmin(); };
 $("#admin-password").addEventListener("keydown", e => { if (e.key === "Enter") $("#entra-admin").click(); });
 $("#crea-admin").onclick = creaAccountAdmin;
+$("#magic-admin").onclick = () => inviaMagicLink($("#admin-email").value.trim());
 $("#collega-admin-btn").onclick = collegaAdmin;
 $("#esci").onclick = esci;
 $("#modale").addEventListener("click", e => { if (e.target.id === "modale") chiudiModale(); });
 
 (async () => {
-  if (authCarica()) {
+  authDaURL();
+  if (authSession || authCarica()) {
     if (await authPronto()) {
-      try { if (await verificaAdminAuth()) return; } catch (e) { authDimentica(); }
+      try { if (await verificaAuth()) return; } catch (e) { authDimentica(); }
     }
   }
+  // Migrazione automatica dal vecchio browser: usa una volta il codice salvato e poi lo elimina.
   const salvato = ls.get("fm_codice", "");
   if (salvato) { $("#codice").value = salvato; entra(salvato); }
 })();
