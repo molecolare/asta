@@ -248,7 +248,6 @@ async function chiama(metodo, percorso, corpo, riprova) {
   return r.json();
 }
 const rpc = (nome, par) => chiama("POST", "/rest/v1/rpc/" + nome, par || {});
-const leggiTab = q => chiama("GET", "/rest/v1/" + q);
 
 let toastT = null;
 function toast(testo, err) {
@@ -1288,11 +1287,15 @@ function copia(testo) {
 let A = null;                         // {corr, offerte, messaggi, squadre, musicisti}
 let ultimoM = null, bannerT = null, contoT = null;
 async function caricaAsta() {
-  const corr = (await leggiTab("asta_corrente?select=*&id=eq.1"))[0] || {};
-  const [off, msg, sq, mu] = await Promise.all([
-    corr.musicista_id != null ? leggiTab(`asta_offerte?select=*&musicista_id=eq.${corr.musicista_id}&order=id.desc&limit=30`) : Promise.resolve([]),
-    leggiTab("asta_messaggi?select=*&order=id.desc&limit=40"), leggiTab("asta_squadre?select=*&order=nome"), leggiTab("asta_musicisti?select=*&order=nome")]);
-  A = { corr, offerte: off, messaggi: msg, squadre: sq, musicisti: mu };
+  const r = await rpc("asta_leggi");
+  if (!r || r.ok === false) throw new Error((r && r.errore) || "Lettura asta non autorizzata");
+  A = {
+    corr: r.corr || {},
+    offerte: r.offerte || [],
+    messaggi: r.messaggi || [],
+    squadre: r.squadre || [],
+    musicisti: r.musicisti || []
+  };
   if (vista.tab === "asta") disegnaAsta();
 }
 VISTE.asta = function (box) {
@@ -1421,8 +1424,9 @@ function nuovoMessaggio(testo) {
 }
 async function messaggiNuovi() {
   if (ultimoM === null) return;
-  const nuovi = await leggiTab(`asta_messaggi?select=*&id=gt.${ultimoM}&order=id.asc&limit=20`);
-  nuovi.forEach(m => nuovoMessaggio(m.testo));
+  const r = await rpc("asta_messaggi_dopo", { p_dopo: ultimoM });
+  if (!r || r.ok === false) throw new Error((r && r.errore) || "Lettura messaggi non autorizzata");
+  (r.messaggi || []).forEach(m => nuovoMessaggio(m.testo));
 }
 
 // ---------------------------------------------------------------------------------------------
