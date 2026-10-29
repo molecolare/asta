@@ -1180,11 +1180,46 @@ $("#btnRich").onclick = () => {
 };
 
 // ----- mercato -----
+const mercatoUI = { q: "", stato: "tutti", ordine: "recenti" };
+function testoRicercaScambio(p) {
+  return [p.id, p.da, p.a, ...(p.nomi_offro || []), ...(p.nomi_chiedo || []), p.stato, p.data, p.data_esito]
+    .filter(x => x !== null && x !== undefined).join(" ").toLowerCase();
+}
+function filtraOrdinaScambi(lista, storico) {
+  const q = mercatoUI.q.trim().toLowerCase();
+  let r = lista.filter(p => !q || testoRicercaScambio(p).includes(q));
+  if (storico && mercatoUI.stato !== "tutti") r = r.filter(p => p.stato === mercatoUI.stato);
+  const data = p => String(p.data_esito || p.data || "");
+  const cmp = {
+    recenti: (a,b) => data(b).localeCompare(data(a)) || Number(b.id||0)-Number(a.id||0),
+    vecchi: (a,b) => data(a).localeCompare(data(b)) || Number(a.id||0)-Number(b.id||0),
+    proponente: (a,b) => String(a.da||"").localeCompare(String(b.da||""), "it", {sensitivity:"base"}) || Number(b.id||0)-Number(a.id||0),
+    destinatario: (a,b) => String(a.a||"").localeCompare(String(b.a||""), "it", {sensitivity:"base"}) || Number(b.id||0)-Number(a.id||0),
+    conguaglio: (a,b) => Math.abs(Number(b.crediti||0))-Math.abs(Number(a.crediti||0)) || Number(b.id||0)-Number(a.id||0)
+  }[mercatoUI.ordine] || (() => 0);
+  return r.slice().sort(cmp);
+}
+function ordineTabellaScambi(k) {
+  return ({ recenti:{k:"data",desc:true}, vecchi:{k:"data",desc:false}, proponente:{k:"da",desc:false}, destinatario:{k:"a",desc:false}, conguaglio:{k:"cr",desc:true} })[k] || {k:"data",desc:true};
+}
+function controlliMercato(box, storico=false) {
+  const q = h("input", { value: mercatoUI.q, placeholder: "Cerca giocatore o musicista…", onkeydown: e => { if (e.key === "Enter") { mercatoUI.q = q.value; render(); } } });
+  const stato = storico ? h("select", { onchange: () => { mercatoUI.stato = stato.value; render(); } },
+    [["tutti","Tutti gli esiti"],["accettato","Accettati"],["rifiutato","Rifiutati"],["annullato","Annullati"]].map(([v,t]) => h("option", { value:v, text:t, selected: mercatoUI.stato===v }))) : null;
+  const ord = h("select", { onchange: () => { mercatoUI.ordine = ord.value; if (storico) ordini.scambi_st = ordineTabellaScambi(mercatoUI.ordine); render(); } },
+    [["recenti","Più recenti"],["vecchi","Più vecchi"],["proponente","Proponente A-Z"],["destinatario","Destinatario A-Z"],["conguaglio","Conguaglio maggiore"]].map(([v,t]) => h("option", { value:v, text:t, selected: mercatoUI.ordine===v })));
+  const applica = h("button", { class:"n auto", text:"Filtra", onclick: () => { mercatoUI.q = q.value; render(); } });
+  const azzera = h("button", { class:"n auto", text:"Azzera", onclick: () => { mercatoUI.q=""; mercatoUI.stato="tutti"; mercatoUI.ordine="recenti"; render(); } });
+  box.append(h("div", { class:"card" }, h("div", { class:"riga" }, q, ord, stato, applica, azzera)));
+}
 VISTE.mercato = function (box) {
   vista.sub = vista.sub || "sospeso";
   const imp = D.impostazioni, fatti = io.ruolo === "giocatore" ? scambiFatti(io.nome) : 0, max = imp.scambi_max === undefined ? 3 : imp.scambi_max;
+  const visibili = D.scambi.filter(p => io.ruolo === "admin" || p.da === io.nome || p.a === io.nome);
+  const pend = visibili.filter(p => p.stato === "proposto"), ricevute = pend.filter(p => p.a === io.nome).length, inviate = pend.filter(p => p.da === io.nome).length;
   box.append(h("div", { class: "card" }, h("h2", { text: "Mercato e scambi" }),
     h("p", null, `Mercato ${imp.mercato_aperto === false ? "CHIUSO" : "APERTO"}`, io.ruolo === "giocatore" ? ` - i tuoi scambi: ${fatti}/${max}` : ""),
+    h("p", { class:"dim", text: io.ruolo === "admin" ? `${pend.length} proposte aperte nel mercato` : `${ricevute} ricevute - ${inviate} inviate` }),
     io.ruolo === "admin" ? h("div", { class: "riga" }, h("button", { class: "n auto", text: imp.mercato_aperto === false ? "Apri il mercato" : "Chiudi il mercato",
       onclick: () => opAdmin("mercato", { aperto: imp.mercato_aperto === false }) })) : null));
   box.append(sottoMenu([["sospeso", "Proposte in sospeso"], ["nuova", "Nuova proposta"], ["storico", "Storico"]], vista.sub));
@@ -1195,19 +1230,26 @@ VISTE.mercato = function (box) {
     { k: "da", t: "Proponente", v: p => p.da }, { k: "a", t: "Destinatario", v: p => p.a },
     { k: "cede", t: "Proponente cede", v: p => (p.nomi_offro || []).join(", ") || null, sort: false },
     { k: "rec", t: "Destinatario cede", v: p => (p.nomi_chiedo || []).join(", ") || null, sort: false },
-    { k: "cr", t: "Conguaglio (paga il proponente)", v: p => p.crediti, a: "r", f: v => v ? sgn(v) : "-" },
+    { k: "cr", t: "Conguaglio", v: p => p.crediti, ord: p => Math.abs(Number(p.crediti || 0)), a: "r", f: v => v ? sgn(v) : "-" },
     { k: "stato", t: "Stato", v: p => p.stato },
   ];
   if (vista.sub === "storico") {
-    const chiusi = D.scambi.filter(p => p.stato !== "proposto");
-    return box.append(h("div", { class: "card" }, h("h2", { text: "Storico scambi" }), tabella("scambi_st", colScambi, chiusi, ["id", true], { vuoto: "Nessuno scambio concluso." })));
+    controlliMercato(box, true);
+    const chiusi = filtraOrdinaScambi(visibili.filter(p => p.stato !== "proposto"), true);
+    if (!ordini.scambi_st) ordini.scambi_st = ordineTabellaScambi(mercatoUI.ordine);
+    const od = ordini.scambi_st;
+    return box.append(h("div", { class: "card" }, h("h2", { text: `Storico scambi (${chiusi.length})` }), tabella("scambi_st", colScambi, chiusi, [od.k, od.desc], { vuoto: "Nessuno scambio corrisponde ai filtri." })));
   }
-  const aperte = D.scambi.filter(p => p.stato === "proposto");
-  const c = h("div", { class: "card" }, h("h2", { text: "Proposte in sospeso" }));
-  if (!aperte.length) c.append(h("p", { text: "Nessuna proposta in sospeso." }));
+  controlliMercato(box, false);
+  const aperte = filtraOrdinaScambi(pend, false);
+  const c = h("div", { class: "card" }, h("h2", { text: `Proposte in sospeso (${aperte.length})` }));
+  if (!aperte.length) c.append(h("p", { text: "Nessuna proposta corrisponde ai filtri." }));
   aperte.forEach(p => {
     const [err, dopo] = simulaScambio(p);
-    const sono_dest = io.nome === p.a, sono_prop = io.nome === p.da;
+    const sono_dest = io.nome === p.a || io.ruolo === "admin", sono_prop = io.nome === p.da || io.ruolo === "admin";
+    const rispondi = azione => io.ruolo === "admin"
+      ? opAdmin("scambio_rispondi", { id: p.id, azione })
+      : invia("scambio_rispondi", { id: p.id, azione });
     const b = h("div", { class: "blocco" },
       h("div", null, h("b", { text: `#${p.id}: ${p.da} → ${p.a}` }), h("span", { class: "dim", text: "  " + p.data })),
       h("div", null, `${p.da} cede: ${(p.nomi_offro || []).join(", ") || "nessun musicista"}`),
@@ -1217,10 +1259,10 @@ VISTE.mercato = function (box) {
       err ? h("div", { class: "neg", text: "Non fattibile ora: " + err }) : null);
     const r = h("div", { class: "riga" });
     if (sono_dest) {
-      r.append(h("button", { class: "n", text: "Accetta", disabled: !!err || imp.mercato_aperto === false, onclick: () => invia("scambio_rispondi", { id: p.id, azione: "accetta" }) }));
-      r.append(h("button", { class: "n", text: "Rifiuta", onclick: () => invia("scambio_rispondi", { id: p.id, azione: "rifiuta" }) }));
+      r.append(h("button", { class: "n", text: "Accetta", disabled: !!err || imp.mercato_aperto === false, onclick: () => rispondi("accetta") }));
+      r.append(h("button", { class: "n", text: "Rifiuta", onclick: () => rispondi("rifiuta") }));
     }
-    if (sono_prop) r.append(h("button", { class: "n", text: "Annulla la proposta", onclick: () => invia("scambio_rispondi", { id: p.id, azione: "annulla" }) }));
+    if (sono_prop) r.append(h("button", { class: "n", text: "Annulla la proposta", onclick: () => rispondi("annulla") }));
     if (r.children.length) b.append(r);
     c.append(b);
   });
@@ -2066,19 +2108,35 @@ function copia(testo) {
 // ---------------------------------------------------------------------------------------------
 // Asta live
 // ---------------------------------------------------------------------------------------------
-let A = null;                         // {corr, offerte, messaggi, squadre, musicisti}
+let A = null;                         // {corr, offerte, messaggi, squadre, musicisti, storico}
 let ultimoM = null, bannerT = null, contoT = null;
+const astaUI = { q: "", ordine: "nome", storicoQ: "", storicoEsito: "tutte", storicoStagione: "tutte" };
 async function caricaAsta() {
+  const eraAperta = !!(A && A.corr && A.corr.aperta);
   const r = await rpc("asta_leggi");
   if (!r || r.ok === false) throw new Error((r && r.errore) || "Lettura asta non autorizzata");
+  const storico = (A && A.storico) || [];
   A = {
     corr: r.corr || {},
     offerte: r.offerte || [],
     messaggi: r.messaggi || [],
     squadre: r.squadre || [],
-    musicisti: r.musicisti || []
+    musicisti: r.musicisti || [],
+    storico
   };
   if (vista.tab === "asta") disegnaAsta();
+  if (eraAperta && !A.corr.aperta) caricaStoricoAsta(true).catch(()=>{});
+}
+async function caricaStoricoAsta(forza=false) {
+  if (!forza && A && Array.isArray(A.storico) && A.storico.length) { disegnaStoricoAsta(); return; }
+  try {
+    const r = await rpc("asta_storico", { p_limite: 200 });
+    if (!A) A = { corr:{}, offerte:[], messaggi:[], squadre:[], musicisti:[], storico:[] };
+    A.storico = (r && r.aste) || [];
+    disegnaStoricoAsta();
+  } catch (e) {
+    const c = $("#as-storico"); if (c) { c.innerHTML=""; c.append(h("p", { class:"neg", text:"Storico aste non disponibile: " + e.message })); }
+  }
 }
 VISTE.asta = function (box) {
   const root = h("div", { id: "as-root", class: "grid2" });
@@ -2094,22 +2152,73 @@ VISTE.asta = function (box) {
     h("div", { class: "riga" }, btn("Poco tempo!", () => msgAsta("Poco tempo!")), btn("Ultima chiamata!", () => msgAsta("Ultima chiamata!"))),
     h("div", { class: "riga" }, btn("Conto 5", () => contoAsta(5)), btn("Conto 10", () => contoAsta(10))),
     h("div", { class: "riga" }, testo, h("button", { class: "n auto", text: "Invia", onclick: () => { if (testo.value.trim()) { msgAsta(testo.value.trim()); testo.value = ""; } } })),
-    h("p", { class: "dim", text: "Per aprire un'asta tocca «Metti in asta» accanto a un musicista disponibile (qui sotto)." }));
+    h("p", { class: "dim", text: "Per aprire un'asta usa «Metti in asta» nell'elenco dei musicisti disponibili." }));
   sinistra.append(h("div", { class: "card" }, h("h2", { text: "In asta" }), h("div", { class: "grande", id: "as-musicista", text: "Nessuna asta aperta" }),
     h("div", { class: "dim", id: "as-miglior", style: "margin-top:6px" }), h("div", { class: "dim", id: "as-miei", style: "margin-top:6px" }), controlli, comandi, h("div", { class: "esito", id: "as-esito" })),
-    h("div", { class: "card" }, h("h2", { text: "Offerte" }), h("ul", { class: "lista", id: "as-offerte" })));
+    h("div", { class: "card" }, h("h2", { text: "Offerte dell'asta corrente" }), h("ul", { class: "lista", id: "as-offerte" })));
   destra.append(h("div", { class: "card" }, h("h2", { text: "Canale dell'asta" }), h("div", { class: "lista", id: "as-messaggi" })),
     h("div", { class: "card" }, h("h2", null, "Squadre ", h("span", { class: "dim", id: "as-online" })), h("ul", { class: "lista", id: "as-squadre", style: "max-height:none" })));
-  root.append(sinistra, destra, h("div", { class: "card" }, h("h2", { text: "Musicisti disponibili" }), h("ul", { class: "lista", id: "as-liberi" })),
-    h("div", { class: "card" }, h("h2", { text: "Musicisti assegnati" }), h("ul", { class: "lista", id: "as-assegnati" })));
+  const cerca = h("input", { id:"as-cerca", value:astaUI.q, placeholder:"Cerca musicista o squadra…", oninput:()=>{ astaUI.q=cerca.value; disegnaAsta(); } });
+  const ord = h("select", { id:"as-ordina", onchange:()=>{ astaUI.ordine=ord.value; disegnaAsta(); } },
+    [["nome","Nome A-Z"],["prezzo","Prezzo più alto"],["squadra","Squadra A-Z"]].map(([v,t])=>h("option",{value:v,text:t,selected:astaUI.ordine===v})));
+  root.append(sinistra, destra,
+    h("div", { class:"card" }, h("h2", { text:"Cerca e ordina musicisti" }), h("div", { class:"riga" }, cerca, ord)),
+    h("div", { class:"card" }, h("h2", { text:"Legenda" }), h("p", { class:"dim", text:"Gli elenchi sotto seguono il filtro. Prezzo e squadra sono disponibili per i musicisti già assegnati." })),
+    h("div", { class: "card" }, h("h2", { text: "Musicisti disponibili" }), h("ul", { class: "lista", id: "as-liberi" })),
+    h("div", { class: "card" }, h("h2", { text: "Musicisti assegnati" }), h("ul", { class: "lista", id: "as-assegnati" })),
+    h("div", { class:"card", style:"grid-column:1/-1" }, h("div", { class:"riga" }, h("h2", { text:"Storico aste" }), h("button", { class:"n auto", text:"Aggiorna", onclick:()=>caricaStoricoAsta(true) })),
+      h("div", { class:"riga" },
+        h("input", { id:"as-stq", value:astaUI.storicoQ, placeholder:"Cerca musicista o giocatore…", oninput:e=>{astaUI.storicoQ=e.target.value; disegnaStoricoAsta();} }),
+        h("select", { id:"as-ste", onchange:e=>{astaUI.storicoEsito=e.target.value; disegnaStoricoAsta();} },
+          [["tutte","Tutti gli esiti"],["aggiudicata","Aggiudicate"],["annullata","Annullate"]].map(([v,t])=>h("option",{value:v,text:t,selected:astaUI.storicoEsito===v}))),
+        h("select", { id:"as-stag", onchange:e=>{astaUI.storicoStagione=e.target.value; disegnaStoricoAsta();} })),
+      h("div", { id:"as-storico" }, h("p", { class:"dim", text:"Caricamento storico…" }))));
   box.append(root);
   const app = $("#app"); app.innerHTML = ""; app.append(box);
   if (A) disegnaAsta(); else caricaAsta().catch(e => asEsito("Connessione: " + e.message, true));
+  caricaStoricoAsta().catch(()=>{});
 };
 function asEsito(t, err) { const e = $("#as-esito"); if (e) { e.className = "esito " + (err ? "err" : "ok"); e.textContent = t; } }
 function limitiAsta() {
   const c = A.corr, s = A.squadre.find(x => x.nome === io.nome);
   return { min: c && c.miglior_importo != null ? c.miglior_importo + c.rilancio_min : 1, max: s ? s.crediti - (s.posti - 1) : 0, s };
+}
+function ordinaMusicistiAsta(lista) {
+  const q = astaUI.q.trim().toLowerCase();
+  const r = lista.filter(m => !q || [m.nome,m.soprannome,m.proprietario].filter(Boolean).join(" ").toLowerCase().includes(q));
+  if (astaUI.ordine === "prezzo") return r.sort((a,b)=>Number(b.prezzo||0)-Number(a.prezzo||0)||String(a.nome).localeCompare(String(b.nome),"it"));
+  if (astaUI.ordine === "squadra") return r.sort((a,b)=>String(a.proprietario||"~").localeCompare(String(b.proprietario||"~"),"it")||String(a.nome).localeCompare(String(b.nome),"it"));
+  return r.sort((a,b)=>String(a.nome).localeCompare(String(b.nome),"it",{sensitivity:"base"}));
+}
+function disegnaStoricoAsta() {
+  if (!A || !$("#as-storico")) return;
+  const tutte = Array.isArray(A.storico) ? A.storico : [];
+  const stagSel=$("#as-stag");
+  if (stagSel) {
+    const stagioni=[...new Set(tutte.map(x=>x.stagione||"(senza stagione)"))];
+    const corrente=astaUI.storicoStagione;
+    stagSel.innerHTML=""; stagSel.append(h("option",{value:"tutte",text:"Tutte le stagioni"}));
+    stagioni.forEach(st=>stagSel.append(h("option",{value:st,text:st,selected:corrente===st})));
+    if (corrente!=="tutte" && !stagioni.includes(corrente)) astaUI.storicoStagione="tutte";
+    stagSel.value=astaUI.storicoStagione;
+  }
+  const q=astaUI.storicoQ.trim().toLowerCase();
+  const righe=tutte.filter(x=>astaUI.storicoEsito==="tutte"||x.esito===astaUI.storicoEsito)
+    .filter(x=>astaUI.storicoStagione==="tutte"||(x.stagione||"(senza stagione)")===astaUI.storicoStagione)
+    .filter(x=>!q||[x.musicista,x.vincitore,x.stagione,...((x.offerte||[]).map(o=>o.giocatore))].filter(Boolean).join(" ").toLowerCase().includes(q));
+  const c=$("#as-storico"); c.innerHTML="";
+  if (!righe.length) return c.append(h("p",{class:"dim",text:"Nessuna asta corrisponde ai filtri."}));
+  righe.forEach(x=>{
+    const off=(x.offerte||[]), seq=off.map(o=>`${o.giocatore} ${o.importo}`).join(" → ");
+    const quando=x.chiusa_il ? new Date(x.chiusa_il).toLocaleString("it-IT") : "";
+    const esito=x.esito==="aggiudicata" ? `AGGIUDICATA a ${x.vincitore} per ${x.importo} cr.` : `ANNULLATA${x.vincitore ? ` (ultima offerta ${x.importo} di ${x.vincitore})` : ""}`;
+    c.append(h("div",{class:"blocco"},
+      h("div",null,h("b",{text:x.musicista}),h("span",{class:"tag",text:x.esito.toUpperCase()})),
+      h("div",{text:esito}),
+      h("div",{class:"dim",text:`${x.stagione||"Stagione non indicata"}${quando ? " | "+quando : ""} | ${off.length} offerte`}),
+      seq ? h("div",{class:"dim",text:"Rilanci: "+seq}) : h("div",{class:"dim",text:"Nessuna offerta registrata"})
+    ));
+  });
 }
 function disegnaAsta() {
   if (!$("#as-root") || !A) return;
@@ -2119,18 +2228,18 @@ function disegnaAsta() {
     ? (c.miglior_importo != null ? `Miglior offerta: ${c.miglior_importo} crediti di ${c.miglior_offerente}` : "Nessuna offerta (base 1 credito)") + ` - rilancio minimo ${c.rilancio_min}`
     : (c.musicista ? "Ultima asta: " + c.musicista : "");
   const { min, max, s } = limitiAsta();
-  $("#as-miei").textContent = s && io.ruolo === "giocatore" ? `I tuoi crediti: ${s.crediti} - posti liberi: ${s.posti}` : "";
+  $("#as-miei").textContent = s && io.ruolo === "giocatore" ? `I tuoi crediti: ${s.crediti} - posti liberi: ${s.posti} - offerta possibile fino a ${Math.max(0,max)}` : "";
   if (io.ruolo !== "admin") {
     const primo = c.aperta && c.miglior_offerente === io.nome, attivo = c.aperta && !primo && s && s.posti > 0 && max >= min;
     $("#as-rilancia").disabled = !attivo;
     $("#as-importo").placeholder = attivo ? `da ${min} a ${max}` : "Importo";
     const r = $("#as-rapidi"); r.innerHTML = "";
-    [min, min + 4, min + 9].forEach(v => r.append(h("button", { class: "n", text: String(v), disabled: !attivo || v > max, onclick: () => rilancia(v) })));
+    [...new Set([min, min + Math.max(1,c.rilancio_min||1), min + Math.max(2,(c.rilancio_min||1)*2)])].forEach(v => r.append(h("button", { class: "n", text: String(v), disabled: !attivo || v > max, onclick: () => rilancia(v) })));
     if (primo) asEsito("Sei il miglior offerente!");
   }
   const off = $("#as-offerte"); off.innerHTML = "";
   if (!A.offerte.length) off.append(h("li", { class: "dim", text: "Nessuna offerta" }));
-  A.offerte.forEach(o => off.append(h("li", { class: o.giocatore === io.nome ? "io" : "" }, h("span", { text: o.giocatore }), h("span", { text: o.importo + " cr." }))));
+  A.offerte.forEach(o => off.append(h("li", { class: o.giocatore === io.nome ? "io" : "" }, h("span", { text: o.giocatore }), h("span", { text: `${o.importo} cr.${o.creato ? " · "+new Date(o.creato).toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit",second:"2-digit"}) : ""}` }))));
   const ms = $("#as-messaggi"); ms.innerHTML = "";
   A.messaggi.forEach(m => ms.append(h("div", { class: "msg", text: m.testo })));
   const sq = $("#as-squadre"); sq.innerHTML = ""; let on = 0;
@@ -2142,13 +2251,15 @@ function disegnaAsta() {
   });
   $("#as-online").textContent = `(${on} collegati)`;
   const l1 = $("#as-liberi"), l2 = $("#as-assegnati"); l1.innerHTML = ""; l2.innerHTML = "";
-  A.musicisti.forEach(m => {
+  const mm=ordinaMusicistiAsta((A.musicisti||[]).slice());
+  mm.forEach(m => {
     if (m.proprietario) l2.append(h("li", null, h("span", { text: m.nome }), h("span", { class: "dim", text: `${m.proprietario} - ${m.prezzo} cr.` })));
     else l1.append(h("li", null, h("span", { text: m.nome }), c.aperta && c.musicista_id === m.id ? h("span", { class: "tag", text: "IN ASTA" })
       : io.ruolo === "admin" ? h("button", { class: "n picc", text: "Metti in asta", disabled: !!c.aperta, onclick: () => apriAsta(m) }) : null));
   });
-  if (!l1.children.length) l1.append(h("li", { class: "dim", text: "Nessuno" }));
-  if (!l2.children.length) l2.append(h("li", { class: "dim", text: "Nessuno" }));
+  if (!l1.children.length) l1.append(h("li", { class: "dim", text: "Nessun musicista disponibile corrisponde al filtro" }));
+  if (!l2.children.length) l2.append(h("li", { class: "dim", text: "Nessun musicista assegnato corrisponde al filtro" }));
+  disegnaStoricoAsta();
 }
 async function rilancia(importo) {
   asEsito("...");
