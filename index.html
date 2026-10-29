@@ -1538,6 +1538,8 @@ function disegnaSetupPartita(box, iniziale) {
       const cfg = { stagione: stagione.value.trim(), musicisti_per_squadra: ni, budget_iniziale: bu, rilancio_minimo: ri,
         scambi_max: sc, mercato_aperto: mercato.checked, partecipanti: nomiSetup(partecipanti.value), musicisti: nomiSetup(musicisti.value),
         mantieni_regole: regole.checked, mantieni_storico: storico.checked, mantieni_profili: profili.checked };
+      // Protezione da setup su dati vecchi: il server confronta questa versione sotto lock.
+      if (D && S.versione != null) cfg.versione_base = Number(S.versione);
       if (!cfg.stagione) throw new Error("Scrivi il nome della stagione.");
       if (![ni, bu, ri, sc].every(Number.isInteger) || ni < 1 || bu < 1 || ri < 1 || sc < 0) throw new Error("Controlla i valori numerici.");
       if (ni > bu) throw new Error("Il budget deve permettere almeno 1 credito per ogni posto in squadra.");
