@@ -821,7 +821,7 @@ function modaleMusicista(mid) {
     fu ? h("img", { class: "foto-grande", src: fu, alt: m.nome }) : null,
     admin() ? controlliFoto("musicista", m.id, m.foto, true) : null,
     m.soprannome ? h("p", { class: "dim", text: "Soprannome: " + m.soprannome }) : null,
-    h("p", null, "Squadra: ", m.proprietario ? `${m.proprietario} (prezzo ${m.prezzo})` : "nessuna", " - Punti: ", h("b", { text: puntiMus(mid) })),
+    h("p", null, "Squadra: ", m.proprietario ? `${m.proprietario} (prezzo finale ${m.prezzo})` : "nessuna", ` - Base asta: ${prezzoBase(m)} - Punti: `, h("b", { text: puntiMus(mid) })),
     campi.length ? h("div", null, campi.map(c => { const v = valProfilo(m, c); return (v === undefined || v === null || v === "") ? null : h("div", { text: `${c.nome}: ${fmt(v)}` }); })) : null,
     buffs.length ? h("div", null, h("h3", { text: "Buff / debuff attivi" }), buffs.map(b => h("div", { class: "dim", text: descriviBonusEsteso(b) }))) : null,
     h("h3", { text: "Eventi" }),
@@ -891,12 +891,30 @@ function modaleEvento(e, torna) {
       + (p.proposto_da ? ` - proposto da ${p.proposto_da}` : "") }),
     admin() && p.duplicato ? h("p", { class: "dim", style: "color:var(--giallo)", text: "Segnalato come probabile doppione: visibile solo a te (admin)." }) : null,
     p.nota ? h("p", null, "Nota: ", p.nota) : null,
+    p.corretto ? h("p", { class: "dim", text: "Corretto dall'admin" + (p.data_correzione ? ` il ${p.data_correzione}` : "") }) : null,
     h("div", null, blocchi),
     g.length > 1 ? h("p", null, h("b", { text: `Totale evento: ${sgn(tot)} punti` })) : null,
     h("div", { class: "riga" },
+      admin() && (e.stato||"ok")==="ok" ? h("button", { class: "n", text: "Correggi punteggio / nota", onclick: () => adminCorreggiEventoWeb(e) }) : null,
       admin() ? h("button", { class: "n", text: "Elimina questo", onclick: () => adminEliminaEventoWeb(e, false) }) : null,
       admin() && g.length > 1 ? h("button", { class: "n", text: "Elimina gruppo", onclick: () => adminEliminaEventoWeb(e, true) }) : null,
       h("button", { class: "n", onclick: torna || chiudiModale, text: torna ? "Indietro" : "Chiudi" }))));
+}
+
+async function adminCorreggiEventoWeb(e) {
+  try {
+    const ctx=await adminScarica(),d=ctx.dati,corr=(d.eventi||[]).find(x=>x.id===e.id);
+    if(!corr) throw new Error("L'evento non esiste più: ricarica i dati.");
+    if((corr.stato||"ok")!=="ok") throw new Error("Si possono correggere solo eventi già confermati.");
+    const gruppo=corr.gruppo?(d.eventi||[]).filter(x=>x.gruppo===corr.gruppo):[corr];
+    const label=corr.dittatura?"Punteggio finale":"Punteggio base";
+    const inp=h("input",{type:"number",value:corr.dittatura?Number(corr.punti||0):Number(corr.base??corr.punti??0),inputmode:"numeric"});
+    const nota=h("textarea",{rows:3,placeholder:"Nota",text:corr.nota||""}); nota.value=corr.nota||"";
+    const prev=h("div",{class:"esito"});
+    const calcola=()=>{const n=Number(inp.value);if(!Number.isInteger(n)){prev.textContent="Inserisci un intero.";prev.className="esito err";return null;}let finale=n,auto=cloneJson(corr.bonus_auto||[]);if(!corr.dittatura){finale=calcolaPunti(n,corr.bonus||[]);finale=calcolaPunti(finale,auto);}prev.className="esito";prev.textContent=`Anteprima finale: ${sgn(finale)} punti${auto.length?" · automatici: "+auto.map(descriviBonus).join(", "):""}`;return {n,finale,auto};};
+    inp.addEventListener("input",calcola); calcola();
+    apriModale(h("div",{class:"card"},h("h2",{text:`Correggi evento #${corr.id}`}),h("p",{class:"dim",text:`${nomeMus(corr.musicista_id)} · ${corr.azione}. Musicista, azione e gruppo non vengono cambiati.`+(gruppo.length>1?` Questa è una sola riga di un gruppo di ${gruppo.length}.`:"")}),h("label",null,label,inp),h("label",null,"Nota",nota),prev,h("div",{class:"riga"},h("button",{class:"n",text:"SALVA CORREZIONE",onclick:async()=>{try{const z=calcola();if(!z)return;if(!confirm(`Salvare la correzione dell'evento #${corr.id} a ${sgn(z.finale)} punti?`))return;if(corr.dittatura){corr.base=z.n;corr.punti=z.n;corr.bonus_auto=[];}else{corr.base=z.n;corr.punti=z.finale;corr.bonus_auto=z.auto;}corr.nota=nota.value.trim();corr.corretto=true;corr.data_correzione=new Date().toISOString().slice(0,16).replace("T"," ");await adminSalva(ctx,"Evento corretto.");chiudiModale();render();toast(`Evento #${corr.id} corretto.`);}catch(err){toast(err.message||String(err),true);}}}),h("button",{class:"n",text:"Annulla",onclick:chiudiModale}))));
+  } catch(err){toast(err.message||String(err),true);}
 }
 
 async function adminEliminaEventoWeb(e, tuttoGruppo) {
@@ -924,11 +942,13 @@ function colonneEventi() {
     { k: "data", t: "Data", v: e => dataEv(e) },
     { k: "mus", t: "Musicista", v: e => nomeMus(e.musicista_id),
       f: (v, e) => { const c = descriviCoinvolti(e); return c ? h("span", null, v, h("span", { class: "coinv", text: " " + c })) : v; } },
-    { k: "azione", t: "Azione", v: e => e.azione, f: (v, e) => admin() && e.duplicato ? v + " *" : v },
+    { k: "azione", t: "Azione", v: e => e.azione, f: (v, e) => v + (e.corretto ? " ✎" : "") + (admin() && e.duplicato ? " *" : "") },
     { k: "punti", t: "Punti", v: e => e.punti, a: "r", f: (v, e) => puntiTxt(e), ord: e => e.stato === "pending" ? null : e.punti },
     { k: "sq", t: "Squadra", v: e => e.proprietario },
   ];
 }
+
+const eventiUI = { q: "", azione: "tutte", segno: "tutti" };
 
 VISTE.eventi = function (box) {
   vista.sub = vista.sub || "ultimi";
@@ -942,11 +962,16 @@ VISTE.eventi = function (box) {
     const per = ls.get("fm_periodo", "30g");
     const sel = h("select", { onchange: ev => { ls.set("fm_periodo", ev.target.value); render(); } },
       PERIODI.map(([v, t]) => h("option", { value: v, selected: v === per, text: t })));
-    const ev = nascondiDup(eventiRecenti(0, filtroPeriodo(per), true));
-    box.append(h("div", { class: "card" }, h("h2", { text: "Eventi" }), sel,
-      h("p", { class: "dim", text: `${ev.length} eventi (${etichettaPeriodo(per)}). Una riga per evento: toccala per i dettagli e il calcolo. Quelle gialle coinvolgono più musicisti.` }),
+    const q=h("input",{placeholder:"cerca musicista, azione, squadra o nota",value:eventiUI.q,oninput:e=>eventiUI.q=e.target.value});
+    const azioni=["tutte",...[...new Set((D.azioni||[]).map(a=>a.nome))].sort((a,b)=>a.localeCompare(b,"it"))];
+    const az=h("select",{onchange:e=>{eventiUI.azione=e.target.value;render();}},azioni.map(x=>h("option",{value:x,selected:x===eventiUI.azione,text:x==="tutte"?"Tutte le azioni":x})));
+    const seg=h("select",{onchange:e=>{eventiUI.segno=e.target.value;render();}},[["tutti","Tutti i punteggi"],["positivi","Positivi"],["negativi","Negativi"],["zero","Zero"]].map(([v,t])=>h("option",{value:v,selected:v===eventiUI.segno,text:t})));
+    const fq=eventiUI.q.trim().toLowerCase();
+    const ev = nascondiDup(eventiRecenti(0, filtroPeriodo(per), true)).filter(e=>{const m=M(e.musicista_id),testo=[m&&m.nome,e.azione,e.proprietario,e.nota].filter(Boolean).join(" ").toLowerCase(); if(fq&&!testo.includes(fq))return false;if(eventiUI.azione!=="tutte"&&e.azione!==eventiUI.azione)return false;const p=Number(e.punti||0);return eventiUI.segno==="tutti"||(eventiUI.segno==="positivi"&&p>0)||(eventiUI.segno==="negativi"&&p<0)||(eventiUI.segno==="zero"&&p===0);});
+    box.append(h("div", { class: "card" }, h("h2", { text: "Eventi" }), h("div",{class:"riga"},sel,q,az,seg),
+      h("p", { class: "dim", text: `${ev.length} eventi filtrati (${etichettaPeriodo(per)}). Una riga per evento: toccala per i dettagli e il calcolo. Quelle gialle coinvolgono più musicisti.` }),
       tabella("ev", colonneEventi(), ev, ["data", true],
-        opzEventi({ vuoto: `Nessun evento: ${etichettaPeriodo(per)}. Scegli un periodo più lungo qui sopra.` }))));
+        opzEventi({ vuoto: `Nessun evento corrisponde ai filtri nel periodo ${etichettaPeriodo(per)}.` }))));
   } else if (vista.sub === "pending") vistaPending(box);
   else if (vista.sub === "auto") vistaAutoChiusi(box);
   else vistaProponi(box);
@@ -1084,7 +1109,7 @@ function vistaProponi(box) {
       if (esito.range) return righe.push(`${nomeSel(s)}: PENDING (voto ${esito.range[0]}-${esito.range[1]})`);
       righe.push(`${nomeSel(s)}: ${sgn(calcolaPunti(esito.fisso, bonus))}`);
     });
-    st.prev.textContent = (admin ? "Punteggio - " : "Punteggio proposto - ") + righe.join(" | ");
+    st.prev.textContent = (admin ? "ANTEPRIMA PRIMA DEL SALVATAGGIO - " : "ANTEPRIMA PROPOSTA - ") + righe.join(" | ");
   }
   function disegna() {
     dyn.innerHTML = "";
@@ -1317,8 +1342,8 @@ function snapshotStatisticheD(d) {
   const cm0=mus.map(m=>[m,pm.get(m.id)||0]).sort((a,b)=>b[1]-a[1]||a[0].nome.localeCompare(b[0].nome));
   const pmpos=posizioni(cm0.map(x=>x[1])), cm=cm0.map((x,i)=>({pos:pmpos[i],m:x[0],punti:x[1]}));
   const budget=Number((d.impostazioni||{}).budget_iniziale||0), spesoTot=gio.reduce((a,u)=>a+sp(u.nome),0), tot=ev.reduce((a,e)=>a+Number(e.punti||0),0);
-  const azMap=new Map(); ev.forEach(e=>{const k=e.azione||"?", x=azMap.get(k)||[0,0];x[0]++;x[1]+=Number(e.punti||0);azMap.set(k,x);});
-  const azioni=[...azMap.entries()].map(([nome,[volte,punti]])=>({nome,volte,punti,media:punti/volte})).sort((a,b)=>b.volte-a.volte||a.nome.localeCompare(b.nome));
+  const azMap=new Map(); ev.forEach(e=>{const k=e.azione||"?",p=Number(e.punti||0),x=azMap.get(k)||{volte:0,punti:0,positivi:0,negativi:0,zeri:0,migliore:null,peggiore:null};x.volte++;x.punti+=p;if(p>0)x.positivi++;else if(p<0)x.negativi++;else x.zeri++;x.migliore=x.migliore===null?p:Math.max(x.migliore,p);x.peggiore=x.peggiore===null?p:Math.min(x.peggiore,p);azMap.set(k,x);});
+  const azioni=[...azMap.entries()].map(([nome,x])=>({nome,...x,media:x.volte?x.punti/x.volte:0})).sort((a,b)=>b.volte-a.volte||a.nome.localeCompare(b.nome));
   const pos=ev.filter(e=>Number(e.punti||0)>0), neg=ev.filter(e=>Number(e.punti||0)<0), zero=ev.filter(e=>Number(e.punti||0)===0);
   let be=0,bce=0,su=0,giu=0; ev.forEach(e=>{if(e.dittatura||e.base===null||e.base===undefined||(!(e.bonus||[]).length&&!(e.bonus_auto||[]).length))return;be++;const z=Number(e.punti||0)-Number(e.base||0);if(z>0)su+=z;else if(z<0)giu+=z;if(z)bce++;});
   const top0=cm0.slice(0,5), peg0=[...cm0].sort((a,b)=>a[1]-b[1]).slice(0,5), somTop=top0.reduce((a,x)=>a+x[1],0), somPeg=peg0.reduce((a,x)=>a+x[1],0);
@@ -1335,7 +1360,7 @@ function snapshotStatisticheD(d) {
       evento_peggiore:evMini(ev.length?ev.reduce((a,b)=>Number(b.punti||0)<Number(a.punti||0)?b:a):null)},
     azioni,
     squadre:cg.map(r=>{const rr=rose(r.nome),x=sp(r.nome);return {pos:r.pos,nome:r.nome,speso:x,budget,punti:r.punti,rosa:rr.length,musicisti:rr.map(m=>m.nome),resa:x?r.punti/x:null,media_musicista:rr.length?r.punti/rr.length:null};}),
-    musicisti:cm.map(r=>({pos:r.pos,id:r.m.id,nome:r.m.nome,squadra:r.m.proprietario,prezzo:r.m.proprietario?Number(r.m.prezzo||0):0,punti:r.punti,resa:r.m.proprietario&&Number(r.m.prezzo||0)?r.punti/Number(r.m.prezzo):null})),
+    musicisti:cm.map(r=>({pos:r.pos,id:r.m.id,nome:r.m.nome,squadra:r.m.proprietario,prezzo_base:prezzoBase(r.m),prezzo:r.m.proprietario?Number(r.m.prezzo||0):0,punti:r.punti,resa:r.m.proprietario&&Number(r.m.prezzo||0)?r.punti/Number(r.m.prezzo):null})),
     distribuzione:{eventi:ev.length,pos_n:pos.length,neg_n:neg.length,zero_n:zero.length,pos_pt:pos.reduce((a,e)=>a+Number(e.punti||0),0),neg_pt:neg.reduce((a,e)=>a+Number(e.punti||0),0),tot_pt:tot},
     bonus:{eventi_con_bonus:be,eventi_con_effetto:bce,su,giu,netto:su+giu},
     top:{righe:top0.map((x,i)=>({pos:i+1,nome:x[0].nome,squadra:x[0].proprietario,punti:x[1]})),somma:somTop,totale:tot,perc:tot?100*somTop/tot:null,k:5},
@@ -1353,7 +1378,7 @@ function storicoStatistiche(box, x, idx) {
   box.append(h("div",{class:"card"},h("h2",{text:x.nome+" - riepilogo statistiche"}),h("table",null,h("tbody",null,righe.map(([a,b])=>h("tr",null,h("td",{text:a}),h("td",{class:"r",text:fmt(b)})))))));
   box.append(h("div",{class:"card"},h("h2",{text:"Squadre / mercato"}),tabella("hsq"+idx,[{k:"p",t:"Pos",v:z=>z.pos,a:"r"},{k:"n",t:"Giocatore",v:z=>z.nome},{k:"sp",t:"Speso",v:z=>z.speso,a:"r"},{k:"pt",t:"Punti",v:z=>z.punti,a:"r"},{k:"re",t:"Pt/credito",v:z=>z.resa,a:"r",f:v=>v==null?"-":v.toFixed(2)}],st.squadre||[],["p",false])));
   box.append(h("div",{class:"card"},h("h2",{text:"Musicisti"}),tabella("hm"+idx,[{k:"p",t:"Pos",v:z=>z.pos,a:"r"},{k:"n",t:"Musicista",v:z=>z.nome},{k:"s",t:"Squadra",v:z=>z.squadra||"-"},{k:"pr",t:"Prezzo",v:z=>z.prezzo||null,a:"r"},{k:"pt",t:"Punti",v:z=>z.punti,a:"r"},{k:"re",t:"Pt/credito",v:z=>z.resa,a:"r",f:v=>v==null?"-":v.toFixed(2)}],st.musicisti||[],["p",false])));
-  box.append(h("div",{class:"card"},h("h2",{text:"Tipi di evento"}),tabella("haz"+idx,[{k:"n",t:"Azione",v:z=>z.nome},{k:"v",t:"Volte",v:z=>z.volte,a:"r"},{k:"pt",t:"Punti",v:z=>z.punti,a:"r"},{k:"m",t:"Media",v:z=>z.media,a:"r",f:v=>Number(v||0).toFixed(2)}],st.azioni||[],["v",true])));
+  box.append(h("div",{class:"card"},h("h2",{text:"Tipi di evento"}),tabella("haz"+idx,[{k:"n",t:"Azione",v:z=>z.nome},{k:"v",t:"Volte",v:z=>z.volte,a:"r"},{k:"pos",t:"+",v:z=>z.positivi??0,a:"r"},{k:"neg",t:"-",v:z=>z.negativi??0,a:"r"},{k:"pt",t:"Punti",v:z=>z.punti,a:"r"},{k:"m",t:"Media",v:z=>z.media,a:"r",f:v=>Number(v||0).toFixed(2)},{k:"best",t:"Migliore",v:z=>z.migliore??0,a:"r",f:v=>sgn(Number(v||0))},{k:"worst",t:"Peggiore",v:z=>z.peggiore??0,a:"r",f:v=>sgn(Number(v||0))}],st.azioni||[],["v",true])));
   const b=st.bonus||{},d=st.distribuzione||{};
   box.append(h("div",{class:"card"},h("h2",{text:"Distribuzione e bonus/malus"}),h("table",null,h("tbody",null,[["Eventi positivi",`${d.pos_n||0} — ${sgn(d.pos_pt||0)} pt`],["Eventi negativi",`${d.neg_n||0} — ${sgn(d.neg_pt||0)} pt`],["Eventi a zero",d.zero_n||0],["Eventi con bonus/malus",b.eventi_con_bonus||0],["Con effetto reale",b.eventi_con_effetto||0],["Punti aggiunti",sgn(b.su||0)],["Punti sottratti",sgn(b.giu||0)],["Effetto netto",sgn(b.netto||0)]].map(([a,c])=>h("tr",null,h("td",{text:a}),h("td",{class:"r",text:String(c)})))))));
   const top=st.top||{},peg=st.peggio||{};
@@ -1639,9 +1664,9 @@ function disegnaSetupPartita(box, iniziale) {
   const rilancio = h("input", { type: "number", min: 1, value: s.rilancio_minimo || 1 });
   const scambi = h("input", { type: "number", min: 0, value: s.scambi_max === undefined ? 3 : s.scambi_max });
   const testoPartecipanti = D ? giocatori().map(u => u.nome).join("\n") : "";
-  const testoMusicisti = D ? D.musicisti.map(m => m.nome).join("\n") : "";
+  const testoMusicisti = D ? D.musicisti.map(m => `${m.nome} | ${prezzoBase(m)}`).join("\n") : "";
   const partecipanti = h("textarea", { class: "setup-lista", rows: 7, placeholder: "Un partecipante per riga" }, testoPartecipanti);
-  const musicisti = h("textarea", { class: "setup-lista", rows: 9, placeholder: "Un musicista per riga" }, testoMusicisti);
+  const musicisti = h("textarea", { class: "setup-lista", rows: 9, placeholder: "Nome musicista | prezzo base" }, testoMusicisti);
   // Imposta anche value: alcuni browser trattano il contenuto iniziale di textarea in modo diverso dopo un rerender dinamico.
   partecipanti.value = testoPartecipanti; musicisti.value = testoMusicisti;
   const anteprimaPartecipanti = h("div", { class: "setup-preview dim" });
@@ -1652,10 +1677,20 @@ function disegnaSetupPartita(box, iniziale) {
     if (!nomi.length) return;
     const r = h("div"); for (const nome of nomi) r.append(h("span", { class: "tag", text: nome })); nodo.append(r);
   };
+  const parseMusicistiSetup = testo => {
+    const esistenti=new Map(((D&&D.musicisti)||[]).map(m=>[String(m.nome).toLowerCase(),prezzoBase(m)])), nomi=[], prezzi_base={}, visti=new Set();
+    for(const raw of String(testo||"").split(/\r?\n/)){ const r=raw.trim(); if(!r) continue;
+      let nome=r, pb=null; const k=r.lastIndexOf("|"); if(k>=0){nome=r.slice(0,k).trim(); const ps=r.slice(k+1).trim(); if(!/^\d+$/.test(ps)||Number(ps)<1) throw new Error(`Prezzo base non valido per '${nome||r}'. Usa NOME | PREZZO.`); pb=Number(ps);}
+      nome=nome.replace(/\s+/g," ").trim().slice(0,80); if(!nome) continue; if(pb==null) pb=esistenti.get(nome.toLowerCase());
+      if(pb==null) throw new Error(`Per il nuovo musicista '${nome}' indica il prezzo base: NOME | PREZZO.`);
+      if(visti.has(nome.toLowerCase())) continue; visti.add(nome.toLowerCase()); nomi.push(nome); prezzi_base[nome]=pb;
+    } return {nomi,prezzi_base};
+  };
+  const aggiornaAnteprimaMusicisti = () => { anteprimaMusicisti.replaceChildren(); try{const x=parseMusicistiSetup(musicisti.value); anteprimaMusicisti.append(h("div",{text:`${x.nomi.length} ${x.nomi.length===1?"musicista":"musicisti"}`})); const r=h("div"); x.nomi.forEach(n=>r.append(h("span",{class:"tag",text:`${n} · ${x.prezzi_base[n]} cr.`}))); anteprimaMusicisti.append(r);}catch(e){anteprimaMusicisti.append(h("div",{style:"color:var(--rosso)",text:e.message}));}};
   partecipanti.addEventListener("input", () => aggiornaAnteprima(partecipanti, anteprimaPartecipanti, "partecipante", "partecipanti"));
-  musicisti.addEventListener("input", () => aggiornaAnteprima(musicisti, anteprimaMusicisti, "musicista", "musicisti"));
+  musicisti.addEventListener("input", aggiornaAnteprimaMusicisti);
   aggiornaAnteprima(partecipanti, anteprimaPartecipanti, "partecipante", "partecipanti");
-  aggiornaAnteprima(musicisti, anteprimaMusicisti, "musicista", "musicisti");
+  aggiornaAnteprimaMusicisti();
   const regole = h("input", { type: "checkbox", checked: !!D }); regole.checked = !!D;
   const storico = h("input", { type: "checkbox", checked: !!D }); storico.checked = !!D;
   const profili = h("input", { type: "checkbox", checked: true }); profili.checked = true;
@@ -1667,7 +1702,7 @@ function disegnaSetupPartita(box, iniziale) {
     h("div", { class: "riga" }, h("label", { class: "auto" }, "Musicisti per squadra", nmax), h("label", { class: "auto" }, "Budget iniziale", budget)),
     h("div", { class: "riga" }, h("label", { class: "auto" }, "Rilancio minimo", rilancio), h("label", { class: "auto" }, "Scambi a testa", scambi)),
     h("h3", { text: "Partecipanti" }), h("p", { class: "dim", text: "Un nome per riga. I nuovi giocatori possono entrare subito dal sito con il codice di associazione; la password locale Kivy potrà essere impostata in seguito." }), partecipanti, anteprimaPartecipanti,
-    h("h3", { text: "Musicisti" }), h("p", { class: "dim", text: "Un nome per riga. La nuova partita parte con tutti i musicisti liberi e prezzo zero." }), musicisti, anteprimaMusicisti,
+    h("h3", { text: "Musicisti" }), h("p", { class: "dim", text: "Uno per riga nel formato NOME | PREZZO BASE. Il prezzo base resta separato dal prezzo finale di aggiudicazione e può essere cambiato ogni stagione." }), musicisti, anteprimaMusicisti,
     h("label", { class: "chk" }, regole, " Mantieni azioni e caratteristiche descrittive"),
     h("label", { class: "chk" }, storico, " Mantieni lo storico delle stagioni precedenti"),
     h("label", { class: "chk" }, profili, " Mantieni profili e soprannomi di chi resta"),
@@ -1686,8 +1721,9 @@ function disegnaSetupPartita(box, iniziale) {
     esito.className = "esito"; esito.textContent = "";
     try {
       const ni = Number(nmax.value), bu = Number(budget.value), ri = Number(rilancio.value), sc = Number(scambi.value);
+      const pm = parseMusicistiSetup(musicisti.value);
       const cfg = { stagione: stagione.value.trim(), musicisti_per_squadra: ni, budget_iniziale: bu, rilancio_minimo: ri,
-        scambi_max: sc, mercato_aperto: mercato.checked, partecipanti: nomiSetup(partecipanti.value), musicisti: nomiSetup(musicisti.value),
+        scambi_max: sc, mercato_aperto: mercato.checked, partecipanti: nomiSetup(partecipanti.value), musicisti: pm.nomi, prezzi_base: pm.prezzi_base,
         mantieni_regole: regole.checked, mantieni_storico: storico.checked, mantieni_profili: profili.checked };
       // Protezione da setup su dati vecchi: il server confronta questa versione sotto lock.
       if (D && S.versione != null) cfg.versione_base = Number(S.versione);
@@ -1943,14 +1979,14 @@ function adminVistaMusicisti(box, ctx) {
       } catch (e) { toast(e.message, true); }
     }}));
     tb.append(h("tr", null, h("td", {text:m.id}), h("td", {text:m.nome+(m.soprannome?` (${m.soprannome})`:"")}),
-      h("td", {text:m.proprietario||"libero"}), h("td", {text:m.proprietario?m.prezzo:"—"}), az));
+      h("td", {text:m.proprietario||"libero"}), h("td", {text:prezzoBase(m)}), h("td", {text:m.proprietario?m.prezzo:"—"}), az));
   });
   card.append(h("div", {class:"tab-wrap"}, h("table", null,
-    h("thead", null, h("tr", null, ["ID","Musicista","Squadra","Prezzo","Azioni"].map(t=>h("th", {text:t})))), tb)));
+    h("thead", null, h("tr", null, ["ID","Musicista","Squadra","Base asta","Prezzo finale","Azioni"].map(t=>h("th", {text:t})))), tb)));
   box.append(card);
 }
-function adminAggiungiMusicisti(ctx){const d=ctx.dati;adminForm("Aggiungi musicisti",[{k:"nomi",label:"Un nome per riga o separato da ';'",type:"textarea",rows:8,value:""}],async v=>{const nomi=String(v.nomi).replace(/;/g,"\n").split(/\r?\n/).map(x=>x.trim().replace(/\s+/g," ")).filter(Boolean);let n=0;for(const nome of nomi){if(d.musicisti.some(m=>m.nome.toLowerCase()===nome.toLowerCase()))continue;d.musicisti.push({id:adminNuovoId(d,"musicista"),nome,soprannome:"",proprietario:null,prezzo:0,profilo:{}});n++;}if(!n)throw new Error("Nessun musicista nuovo.");await adminSalva(ctx,`Aggiunti ${n} musicisti.`);render();});}
-function adminMusicistaForm(ctx,m){const d=ctx.dati;adminForm(`Musicista #${m.id}`,[{k:"nome",label:"Nome",value:m.nome},{k:"soprannome",label:"Soprannome ufficiale",maxlength:30,value:m.soprannome||""},...adminProfiloCampi(d,"musicisti",m)],async v=>{const nome=v.nome.trim().replace(/\s+/g," ");if(!nome)throw new Error("Nome obbligatorio.");if(d.musicisti.some(x=>x!==m&&x.nome.toLowerCase()===nome.toLowerCase()))throw new Error("Esiste già un musicista con questo nome.");m.nome=nome;m.soprannome=v.soprannome.trim().slice(0,30);adminApplicaProfilo(d,"musicisti",m,v);await adminSalva(ctx,"Musicista aggiornato.");render();});}
+function adminAggiungiMusicisti(ctx){const d=ctx.dati;adminForm("Aggiungi musicisti",[{k:"nomi",label:"Uno per riga: NOME | PREZZO BASE",type:"textarea",rows:8,value:""}],async v=>{const righe=String(v.nomi).split(/\r?\n/).map(x=>x.trim()).filter(Boolean), nuovi=[];for(const riga of righe){const k=riga.lastIndexOf("|");if(k<0)throw new Error(`Formato non valido: '${riga}'. Usa NOME | PREZZO BASE.`);const nome=riga.slice(0,k).trim().replace(/\s+/g," "),ps=riga.slice(k+1).trim();if(!nome||!/^\d+$/.test(ps)||Number(ps)<1)throw new Error(`Prezzo base non valido: '${riga}'.`);nuovi.push([nome,Number(ps)]);}let n=0;for(const [nome,pb] of nuovi){if(d.musicisti.some(m=>m.nome.toLowerCase()===nome.toLowerCase()))continue;d.musicisti.push({id:adminNuovoId(d,"musicista"),nome,soprannome:"",proprietario:null,prezzo:0,prezzo_base:pb,profilo:{}});n++;}if(!n)throw new Error("Nessun musicista nuovo.");await adminSalva(ctx,`Aggiunti ${n} musicisti.`);render();});}
+function adminMusicistaForm(ctx,m){const d=ctx.dati;adminForm(`Musicista #${m.id}`,[{k:"nome",label:"Nome",value:m.nome},{k:"soprannome",label:"Soprannome ufficiale",maxlength:30,value:m.soprannome||""},{k:"prezzo_base",label:"Prezzo base d'asta",type:"number",min:1,value:prezzoBase(m)},...adminProfiloCampi(d,"musicisti",m)],async v=>{const nome=v.nome.trim().replace(/\s+/g," "),pb=Number(v.prezzo_base);if(!nome)throw new Error("Nome obbligatorio.");if(!Number.isInteger(pb)||pb<1)throw new Error("Il prezzo base d'asta deve essere un intero ≥ 1.");if(d.musicisti.some(x=>x!==m&&x.nome.toLowerCase()===nome.toLowerCase()))throw new Error("Esiste già un musicista con questo nome.");m.nome=nome;m.soprannome=v.soprannome.trim().slice(0,30);m.prezzo_base=pb;adminApplicaProfilo(d,"musicisti",m,v);await adminSalva(ctx,"Musicista aggiornato.");render();});}
 function adminVistaUtenti(box, ctx) {
   const d = ctx.dati;
   const card = h("div", {class:"card"}, h("h2", {text:"Gestione utenti locali"}),
@@ -1971,8 +2007,8 @@ function adminVistaUtenti(box, ctx) {
 async function adminEliminaUtente(ctx,u){const d=ctx.dati;if(u.ruolo==="admin"&&d.utenti.filter(x=>x.ruolo==="admin").length<=1)return toast("Deve restare almeno un admin locale.",true);if(!confirm(`Eliminare ${u.nome}? I suoi musicisti torneranno liberi.`))return;try{d.musicisti.forEach(m=>{if(m.proprietario===u.nome){m.proprietario=null;m.prezzo=0;}});d.eventi.forEach(e=>{if(e.proprietario===u.nome)e.proprietario=null;});d.scambi.forEach(x=>{if(x.stato==="proposto"&&(x.da===u.nome||x.a===u.nome))x.stato="annullato";});d.utenti=d.utenti.filter(x=>x!==u);await adminSalva(ctx,"Utente eliminato.");render();}catch(e){toast(e.message,true);}}
 function adminUtenteForm(ctx, utente){const d=ctx.dati,nuovo=!utente,u=utente||{nome:"",ruolo:"partecipante",salt:"",hash:"",gioca:true,profilo:{},preferenze:adminPrefsBase(),saldo:0,recupero:null,password_da_impostare:true}; const campi=[{k:"nome",label:"Nome",value:u.nome,disabled:!nuovo},{k:"ruolo",label:"Ruolo locale",type:"select",options:[["partecipante","Partecipante"],["admin","Admin"]],value:u.ruolo},{k:"gioca",label:"Partecipa alla classifica",type:"checkbox",value:!!u.gioca},{k:"password",label:nuovo?"Password Kivy (minimo 4)":"Nuova password Kivy (vuoto = non cambiare)",type:"password",value:""},...adminProfiloCampi(d,"giocatori",u)];adminForm(nuovo?"Nuovo utente":`Utente: ${u.nome}`,campi,async v=>{const nome=v.nome.trim().replace(/\s+/g," ");if(!nome)throw new Error("Nome obbligatorio.");if(d.utenti.some(x=>x!==u&&x.nome.toLowerCase()===nome.toLowerCase()))throw new Error("Utente già esistente.");if(!nuovo&&u.gioca&&!v.gioca&&d.musicisti.some(m=>m.proprietario===u.nome))throw new Error("Ha musicisti in squadra: svincolali prima.");if(!nuovo&&u.ruolo==="admin"&&v.ruolo!=="admin"&&d.utenti.filter(x=>x.ruolo==="admin").length<=1)throw new Error("Deve restare almeno un admin locale.");if(nuovo&&v.password.length<4)throw new Error("Per un nuovo utente serve una password Kivy di almeno 4 caratteri.");if(nuovo){u.preferenze=adminPrefsBase();d.utenti.push(u);}const vecchio=u.nome;u.nome=nome;u.ruolo=v.ruolo;u.gioca=!!v.gioca;u.profilo=u.profilo||{};u.saldo=Number(u.saldo||0);u.recupero=u.recupero??null;if(v.password){if(v.password.length<4)throw new Error("Password di almeno 4 caratteri.");const hp=await hashPasswordLocale(v.password);u.salt=hp.salt;u.hash=hp.hash;u.password_da_impostare=false;}else if(nuovo){u.salt="";u.hash="";u.password_da_impostare=true;}adminApplicaProfilo(d,"giocatori",u,v);if(!nuovo&&vecchio!==nome){d.musicisti.forEach(m=>{if(m.proprietario===vecchio)m.proprietario=nome;});d.eventi.forEach(e=>{if(e.proprietario===vecchio)e.proprietario=nome;});d.scambi.forEach(x=>{if(x.da===vecchio)x.da=nome;if(x.a===vecchio)x.a=nome;});}await adminSalva(ctx,nuovo?"Utente creato.":"Utente aggiornato.",false);if(u.gioca&&!String(u.codice_asta||"").trim()){const rr=await rpc("fm_auth_rigenera_codice",{p_nome:u.nome});if(!rr.ok)throw new Error(rr.errore||"Utente salvato ma codice non generato.");}await carica();toast(nuovo?"Utente creato.":"Utente aggiornato.");render();});}
 function adminClassifiche(d){const ok=(d.eventi||[]).filter(e=>e.stato==="ok"),pm=new Map(),pg=new Map();ok.forEach(e=>{const p=Number(e.punti||0);pm.set(e.musicista_id,(pm.get(e.musicista_id)||0)+p);if(e.proprietario)pg.set(e.proprietario,(pg.get(e.proprietario)||0)+p);});const posiz=arr=>{let last=null,pos=0;return arr.map((r,i)=>{if(last===null||r.punti!==last){pos=i+1;last=r.punti;}return {...r,pos};});};const cg=posiz((d.utenti||[]).filter(u=>u.gioca).map(u=>({nome:u.nome,punti:pg.get(u.nome)||0})).sort((a,b)=>b.punti-a.punti||a.nome.localeCompare(b.nome)));const cm=posiz((d.musicisti||[]).map(m=>({m,punti:pm.get(m.id)||0})).sort((a,b)=>b.punti-a.punti||a.m.nome.localeCompare(b.m.nome)));return{cg,cm};}
-function adminVistaChiudi(box, ctx){const d=ctx.dati,s=d.impostazioni,pend=d.eventi.filter(e=>e.stato==="pending").length;const card=h("div",{class:"card"},h("h2",{text:"Chiudi stagione"}),h("p",{class:"dim",text:`Archivia '${s.stagione}', classifica, eventi validi e scambi accettati; poi libera le rose e azzera saldi/eventi/scambi. Pending attuali: ${pend}. Prima del salvataggio il browser scarica automaticamente un backup JSON.`}));const nome=h("input",{value:`Stagione ${(d.storico||[]).length+1}`,placeholder:"Nome nuova stagione"}),conf=h("input",{placeholder:"Scrivi CHIUDI"});card.append(h("label",null,"Nome nuova stagione",nome),h("label",null,"Conferma",conf),h("button",{class:"n",text:"CHIUDI E ARCHIVIA",onclick:async()=>{if(conf.value!=="CHIUDI")return toast("Scrivi esattamente CHIUDI.",true);if(!confirm(`Chiudere '${s.stagione}'?`))return;try{scaricaJson(`fantabanda-backup-prima-chiusura-${Date.now()}.json`,{formato:"fantabanda-backup-1",versione:ctx.versione,dati:d});const {cg,cm}=adminClassifiche(d),stamp=new Date();const z=n=>String(n).padStart(2,"0"),chiusa=`${stamp.getFullYear()}-${z(stamp.getMonth()+1)}-${z(stamp.getDate())} ${z(stamp.getHours())}:${z(stamp.getMinutes())}`;d.storico=d.storico||[];d.storico.push({id:adminNuovoId(d,"stagione"),nome:s.stagione,chiusa,classifica:cg.map(r=>({pos:r.pos,nome:r.nome,punti:r.punti,musicisti:d.musicisti.filter(m=>m.proprietario===r.nome).map(m=>m.nome)})),musicisti:cm.map(r=>({pos:r.pos,nome:r.m.nome,squadra:r.m.proprietario,prezzo:r.m.prezzo||0,punti:r.punti})),eventi:cloneJson(d.eventi.filter(e=>e.stato==="ok")),scambi:cloneJson(d.scambi.filter(x=>x.stato==="accettato")),statistiche:snapshotStatisticheD(d)});d.eventi=[];d.scambi=[];d.musicisti.forEach(m=>{m.proprietario=null;m.prezzo=0;});d.utenti.forEach(u=>u.saldo=0);s.stagione=nome.value.trim()||`Stagione ${d.storico.length+1}`;await adminSalva(ctx,"Stagione archiviata.");render();}catch(e){toast(e.message,true);}}}));box.append(card);}
-function adminVistaDati(box, ctx){const d=ctx.dati,card=h("div",{class:"card"},h("h2",{text:"Backup, ripristino ed esportazione"}),h("p",{class:"dim",text:"Equivalente web delle funzioni locali Kivy. Il backup completo contiene anche hash password e codici: conservalo privatamente."}));card.append(h("button",{class:"n auto",text:"VERIFICA INTEGRITÀ DATI",onclick:async()=>{try{const r=await rpc("fm_a_verifica_snapshot",{p_dati:d});if(r&&r.valido){toast("Integrità dati: nessun problema rilevato.");}else{const pp=(r&&r.problemi)||[];const msg=pp.length?pp.map(x=>typeof x==="string"?x:JSON.stringify(x)).join("\n"):((r&&r.errore)||"Snapshot non valido.");alert(`Verifica integrità: ${r&&r.numero_problemi!=null?r.numero_problemi:pp.length} problema/i\n\n${msg}`);}}catch(e){toast(e.message,true);}}}));card.append(h("button",{class:"n auto",text:"SCARICA BACKUP JSON COMPLETO",onclick:()=>scaricaJson(`fantabanda-backup-${Date.now()}.json`,{formato:"fantabanda-backup-1",versione:ctx.versione,dati:d})}));const file=h("input",{type:"file",accept:".json,application/json"});const rip=h("button",{class:"n auto",text:"RIPRISTINA BACKUP",onclick:async()=>{try{if(!file.files||!file.files[0])throw new Error("Scegli un file JSON.");const raw=JSON.parse(await file.files[0].text()),nd=raw&&raw.dati?raw.dati:raw;if(!nd||typeof nd!=="object"||!Array.isArray(nd.utenti)||!Array.isArray(nd.musicisti))throw new Error("Backup non riconosciuto.");if(!confirm("Ripristinare questo backup? Lo stato online corrente verrà sostituito."))return;ctx.dati=nd;await adminSalva(ctx,"Backup ripristinato.");render();}catch(e){toast(e.message,true);}}});card.append(h("hr"),h("h3",{text:"Ripristino"}),file,rip,h("hr"),h("h3",{text:"CSV"}));const {cg,cm}=adminClassifiche(d),campG=(d.campi||[]).filter(c=>c.per==="giocatori"),campM=(d.campi||[]).filter(c=>c.per==="musicisti");card.append(h("button",{class:"n auto",text:"CSV CLASSIFICA GIOCATORI",onclick:()=>adminScaricaCsv("classifica_giocatori.csv",["Posizione","Giocatore","Soprannome","Punti","Crediti","Musicisti",...campG.map(c=>c.nome)],cg.map(r=>{const u=d.utenti.find(x=>x.nome===r.nome),sp=d.musicisti.filter(m=>m.proprietario===r.nome).reduce((a,m)=>a+Number(m.prezzo||0),0),cr=Number(d.impostazioni.budget_iniziale)-sp+Number(u.saldo||0);return[r.pos,r.nome,((u.preferenze||{}).soprannome||""),r.punti,cr,d.musicisti.filter(m=>m.proprietario===r.nome).map(m=>m.nome).join(", "),...campG.map(c=>(u.profilo||{})[String(c.id)]??"")];}) )}),h("button",{class:"n auto",text:"CSV CLASSIFICA MUSICISTI",onclick:()=>adminScaricaCsv("classifica_musicisti.csv",["Posizione","Musicista","Soprannome","Squadra","Prezzo","Punti",...campM.map(c=>c.nome)],cm.map(r=>[r.pos,r.m.nome,r.m.soprannome||"",r.m.proprietario||"",r.m.proprietario?r.m.prezzo:"",r.punti,...campM.map(c=>(r.m.profilo||{})[String(c.id)]??"")]))}),h("button",{class:"n auto",text:"CSV EVENTI",onclick:()=>adminScaricaCsv("eventi.csv",["ID","Data","Stato","Musicista","Azione","Ruolo","Punti","Base","Bonus/malus","Voti","Dettaglio","Squadra","DITTATURA","Gruppo","Nota"],d.eventi.map(e=>[e.id,e.data,e.stato,(d.musicisti.find(m=>m.id===e.musicista_id)||{}).nome||"?",e.azione,e.ruolo||"",e.punti,e.base??"",(e.bonus||[]).map(b=>b.nome||"").join(", "),(e.voti||[]).join(" "),e.dettaglio||"",e.proprietario||"",e.dittatura?"sì":"",e.gruppo||"",e.nota||""]))}));box.append(card);}
+function adminVistaChiudi(box, ctx){const d=ctx.dati,s=d.impostazioni,pend=d.eventi.filter(e=>e.stato==="pending").length;const card=h("div",{class:"card"},h("h2",{text:"Chiudi stagione"}),h("p",{class:"dim",text:`Archivia '${s.stagione}', classifica, eventi validi e scambi accettati; poi libera le rose e azzera saldi/eventi/scambi. Pending attuali: ${pend}. Prima del salvataggio il browser scarica automaticamente un backup JSON.`}));const nome=h("input",{value:`Stagione ${(d.storico||[]).length+1}`,placeholder:"Nome nuova stagione"}),conf=h("input",{placeholder:"Scrivi CHIUDI"});card.append(h("label",null,"Nome nuova stagione",nome),h("label",null,"Conferma",conf),h("button",{class:"n",text:"CHIUDI E ARCHIVIA",onclick:async()=>{if(conf.value!=="CHIUDI")return toast("Scrivi esattamente CHIUDI.",true);if(!confirm(`Chiudere '${s.stagione}'?`))return;try{scaricaJson(`fantabanda-backup-prima-chiusura-${Date.now()}.json`,{formato:"fantabanda-backup-1",versione:ctx.versione,dati:d});const {cg,cm}=adminClassifiche(d),stamp=new Date();const z=n=>String(n).padStart(2,"0"),chiusa=`${stamp.getFullYear()}-${z(stamp.getMonth()+1)}-${z(stamp.getDate())} ${z(stamp.getHours())}:${z(stamp.getMinutes())}`;d.storico=d.storico||[];d.storico.push({id:adminNuovoId(d,"stagione"),nome:s.stagione,chiusa,classifica:cg.map(r=>({pos:r.pos,nome:r.nome,punti:r.punti,musicisti:d.musicisti.filter(m=>m.proprietario===r.nome).map(m=>m.nome)})),musicisti:cm.map(r=>({pos:r.pos,nome:r.m.nome,squadra:r.m.proprietario,prezzo_base:prezzoBase(r.m),prezzo:r.m.prezzo||0,punti:r.punti})),eventi:cloneJson(d.eventi.filter(e=>e.stato==="ok")),scambi:cloneJson(d.scambi.filter(x=>x.stato==="accettato")),statistiche:snapshotStatisticheD(d)});d.eventi=[];d.scambi=[];d.musicisti.forEach(m=>{m.proprietario=null;m.prezzo=0;});d.utenti.forEach(u=>u.saldo=0);s.stagione=nome.value.trim()||`Stagione ${d.storico.length+1}`;await adminSalva(ctx,"Stagione archiviata.");render();}catch(e){toast(e.message,true);}}}));box.append(card);}
+function adminVistaDati(box, ctx){const d=ctx.dati,card=h("div",{class:"card"},h("h2",{text:"Backup, ripristino ed esportazione"}),h("p",{class:"dim",text:"Equivalente web delle funzioni locali Kivy. Il backup completo contiene anche hash password e codici: conservalo privatamente."}));card.append(h("button",{class:"n auto",text:"VERIFICA INTEGRITÀ DATI",onclick:async()=>{try{const r=await rpc("fm_a_verifica_snapshot",{p_dati:d});if(r&&r.valido){toast("Integrità dati: nessun problema rilevato.");}else{const pp=(r&&r.problemi)||[];const msg=pp.length?pp.map(x=>typeof x==="string"?x:JSON.stringify(x)).join("\n"):((r&&r.errore)||"Snapshot non valido.");alert(`Verifica integrità: ${r&&r.numero_problemi!=null?r.numero_problemi:pp.length} problema/i\n\n${msg}`);}}catch(e){toast(e.message,true);}}}));card.append(h("button",{class:"n auto",text:"SCARICA BACKUP JSON COMPLETO",onclick:()=>scaricaJson(`fantabanda-backup-${Date.now()}.json`,{formato:"fantabanda-backup-1",versione:ctx.versione,dati:d})}));const file=h("input",{type:"file",accept:".json,application/json"});const rip=h("button",{class:"n auto",text:"RIPRISTINA BACKUP",onclick:async()=>{try{if(!file.files||!file.files[0])throw new Error("Scegli un file JSON.");const raw=JSON.parse(await file.files[0].text()),nd=raw&&raw.dati?raw.dati:raw;if(!nd||typeof nd!=="object"||!Array.isArray(nd.utenti)||!Array.isArray(nd.musicisti))throw new Error("Backup non riconosciuto.");if(!confirm("Ripristinare questo backup? Lo stato online corrente verrà sostituito."))return;ctx.dati=nd;await adminSalva(ctx,"Backup ripristinato.");render();}catch(e){toast(e.message,true);}}});card.append(h("hr"),h("h3",{text:"Ripristino"}),file,rip,h("hr"),h("h3",{text:"CSV"}));const {cg,cm}=adminClassifiche(d),campG=(d.campi||[]).filter(c=>c.per==="giocatori"),campM=(d.campi||[]).filter(c=>c.per==="musicisti");card.append(h("button",{class:"n auto",text:"CSV CLASSIFICA GIOCATORI",onclick:()=>adminScaricaCsv("classifica_giocatori.csv",["Posizione","Giocatore","Soprannome","Punti","Crediti","Musicisti",...campG.map(c=>c.nome)],cg.map(r=>{const u=d.utenti.find(x=>x.nome===r.nome),sp=d.musicisti.filter(m=>m.proprietario===r.nome).reduce((a,m)=>a+Number(m.prezzo||0),0),cr=Number(d.impostazioni.budget_iniziale)-sp+Number(u.saldo||0);return[r.pos,r.nome,((u.preferenze||{}).soprannome||""),r.punti,cr,d.musicisti.filter(m=>m.proprietario===r.nome).map(m=>m.nome).join(", "),...campG.map(c=>(u.profilo||{})[String(c.id)]??"")];}) )}),h("button",{class:"n auto",text:"CSV CLASSIFICA MUSICISTI",onclick:()=>adminScaricaCsv("classifica_musicisti.csv",["Posizione","Musicista","Soprannome","Squadra","Prezzo base","Prezzo finale","Punti",...campM.map(c=>c.nome)],cm.map(r=>[r.pos,r.m.nome,r.m.soprannome||"",r.m.proprietario||"",prezzoBase(r.m),r.m.proprietario?r.m.prezzo:"",r.punti,...campM.map(c=>(r.m.profilo||{})[String(c.id)]??"")]))}),h("button",{class:"n auto",text:"CSV EVENTI",onclick:()=>adminScaricaCsv("eventi.csv",["ID","Data","Stato","Musicista","Azione","Ruolo","Punti","Base","Bonus/malus","Voti","Dettaglio","Squadra","DITTATURA","Gruppo","Nota","Corretto","Data correzione"],d.eventi.map(e=>[e.id,e.data,e.stato,(d.musicisti.find(m=>m.id===e.musicista_id)||{}).nome||"?",e.azione,e.ruolo||"",e.punti,e.base??"",(e.bonus||[]).map(b=>b.nome||"").join(", "),(e.voti||[]).join(" "),e.dettaglio||"",e.proprietario||"",e.dittatura?"sì":"",e.gruppo||"",e.nota||"",e.corretto?"sì":"",e.data_correzione||""]))}));box.append(card);}
 
 
 // ----- impostazioni -----
@@ -2179,14 +2215,22 @@ VISTE.asta = function (box) {
   caricaStoricoAsta().catch(()=>{});
 };
 function asEsito(t, err) { const e = $("#as-esito"); if (e) { e.className = "esito " + (err ? "err" : "ok"); e.textContent = t; } }
+const prezzoBase = m => Math.max(1, Number((m && m.prezzo_base) || 1));
+function riservaRosaAsta(posti, escludiId) {
+  const n=Math.max(0,Number(posti||0)); if(!n) return 0;
+  const basi=((D&&D.musicisti)||[]).filter(m=>!m.proprietario&&m.id!==escludiId).map(prezzoBase).sort((a,b)=>a-b);
+  return basi.slice(0,n).reduce((a,b)=>a+b,0);
+}
 function limitiAsta() {
   const c = A.corr, s = A.squadre.find(x => x.nome === io.nome);
-  return { min: c && c.miglior_importo != null ? c.miglior_importo + c.rilancio_min : 1, max: s ? s.crediti - (s.posti - 1) : 0, s };
+  const base = c && c.aperta ? Math.max(1,Number(c.prezzo_base||1)) : 1;
+  return { min: c && c.miglior_importo != null ? c.miglior_importo + c.rilancio_min : base,
+    max: s ? s.crediti - riservaRosaAsta(Math.max(0,s.posti-1), c&&c.musicista_id) : 0, s };
 }
 function ordinaMusicistiAsta(lista) {
   const q = astaUI.q.trim().toLowerCase();
   const r = lista.filter(m => !q || [m.nome,m.soprannome,m.proprietario].filter(Boolean).join(" ").toLowerCase().includes(q));
-  if (astaUI.ordine === "prezzo") return r.sort((a,b)=>Number(b.prezzo||0)-Number(a.prezzo||0)||String(a.nome).localeCompare(String(b.nome),"it"));
+  if (astaUI.ordine === "prezzo") return r.sort((a,b)=>(b.proprietario?Number(b.prezzo||0):prezzoBase(b))-(a.proprietario?Number(a.prezzo||0):prezzoBase(a))||String(a.nome).localeCompare(String(b.nome),"it"));
   if (astaUI.ordine === "squadra") return r.sort((a,b)=>String(a.proprietario||"~").localeCompare(String(b.proprietario||"~"),"it")||String(a.nome).localeCompare(String(b.nome),"it"));
   return r.sort((a,b)=>String(a.nome).localeCompare(String(b.nome),"it",{sensitivity:"base"}));
 }
@@ -2215,7 +2259,7 @@ function disegnaStoricoAsta() {
     c.append(h("div",{class:"blocco"},
       h("div",null,h("b",{text:x.musicista}),h("span",{class:"tag",text:x.esito.toUpperCase()})),
       h("div",{text:esito}),
-      h("div",{class:"dim",text:`${x.stagione||"Stagione non indicata"}${quando ? " | "+quando : ""} | ${off.length} offerte`}),
+      h("div",{class:"dim",text:`base ${x.prezzo_base||1} cr. | ${x.stagione||"Stagione non indicata"}${quando ? " | "+quando : ""} | ${off.length} offerte`}),
       seq ? h("div",{class:"dim",text:"Rilanci: "+seq}) : h("div",{class:"dim",text:"Nessuna offerta registrata"})
     ));
   });
@@ -2225,7 +2269,7 @@ function disegnaAsta() {
   const c = A.corr || {};
   $("#as-musicista").textContent = c.aperta ? c.musicista : "Nessuna asta aperta";
   $("#as-miglior").textContent = c.aperta
-    ? (c.miglior_importo != null ? `Miglior offerta: ${c.miglior_importo} crediti di ${c.miglior_offerente}` : "Nessuna offerta (base 1 credito)") + ` - rilancio minimo ${c.rilancio_min}`
+    ? (c.miglior_importo != null ? `Miglior offerta: ${c.miglior_importo} crediti di ${c.miglior_offerente}` : `Nessuna offerta (base ${Math.max(1,Number(c.prezzo_base||1))} crediti)`) + ` - rilancio minimo ${c.rilancio_min}`
     : (c.musicista ? "Ultima asta: " + c.musicista : "");
   const { min, max, s } = limitiAsta();
   $("#as-miei").textContent = s && io.ruolo === "giocatore" ? `I tuoi crediti: ${s.crediti} - posti liberi: ${s.posti} - offerta possibile fino a ${Math.max(0,max)}` : "";
@@ -2254,7 +2298,7 @@ function disegnaAsta() {
   const mm=ordinaMusicistiAsta((A.musicisti||[]).slice());
   mm.forEach(m => {
     if (m.proprietario) l2.append(h("li", null, h("span", { text: m.nome }), h("span", { class: "dim", text: `${m.proprietario} - ${m.prezzo} cr.` })));
-    else l1.append(h("li", null, h("span", { text: m.nome }), c.aperta && c.musicista_id === m.id ? h("span", { class: "tag", text: "IN ASTA" })
+    else l1.append(h("li", null, h("span", { text: `${m.nome} · base ${prezzoBase(m)} cr.` }), c.aperta && c.musicista_id === m.id ? h("span", { class: "tag", text: "IN ASTA" })
       : io.ruolo === "admin" ? h("button", { class: "n picc", text: "Metti in asta", disabled: !!c.aperta, onclick: () => apriAsta(m) }) : null));
   });
   if (!l1.children.length) l1.append(h("li", { class: "dim", text: "Nessun musicista disponibile corrisponde al filtro" }));
@@ -2282,7 +2326,7 @@ async function adminAsta(fn, par, okMsg) {
 }
 function apriAsta(m) {
   const rl = Math.max(1, (D && D.impostazioni.rilancio_minimo) || 1);
-  chiedi(`Mettere in asta ${m.nome}? Base 1 credito, rilancio minimo ${rl}.`, "Apri l'asta", () => adminAsta("asta_a_apri", { p_musicista_id: m.id, p_rilancio: rl }, "Asta aperta: " + m.nome));
+  chiedi(`Mettere in asta ${m.nome}? Base ${prezzoBase(m)} crediti, rilancio minimo ${rl}.`, "Apri l'asta", () => adminAsta("asta_a_apri", { p_musicista_id: m.id, p_rilancio: rl }, "Asta aperta: " + m.nome));
 }
 function aggiudicaAsta() {
   const c = (A && A.corr) || {};
