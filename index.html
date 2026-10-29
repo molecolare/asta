@@ -76,7 +76,9 @@
   .punto { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #555; margin-right: 6px; }
   .punto.on { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
   .av { display: inline-flex; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--accent); align-items: center; justify-content: center;
-        font-size: .75em; color: var(--accent); margin-right: 8px; flex: 0 0 auto; background: rgba(0,0,0,.3); }
+        font-size: .75em; color: var(--accent); margin-right: 8px; flex: 0 0 auto; background: rgba(0,0,0,.3); overflow: hidden; }
+  .av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .foto-grande { width: 92px; height: 92px; object-fit: cover; border-radius: 10px; border: 1px solid var(--accent); }
   .nome { display: inline-flex; align-items: center; }
   #login { max-width: 420px; margin: 40px auto; }
   #banner { display: none; padding: 12px 16px; background: var(--accent); color: var(--bg1); font-weight: bold; text-align: center; font-size: 1.2em; }
@@ -152,6 +154,7 @@ const SUPABASE_URL = String(APP_CONFIG.supabaseUrl || "").replace(/\/$/, "");
 const SUPABASE_KEY = String(APP_CONFIG.supabaseKey || APP_CONFIG.supabasePublishableKey || APP_CONFIG.supabaseAnonKey || "").trim();
 const APP_NAME = String(APP_CONFIG.appName || "FantaBanda").trim() || "FantaBanda";
 const WEB_URL = String(APP_CONFIG.webUrl || APP_CONFIG.web_url || "").trim();
+const FOTO_BUCKET = String(APP_CONFIG.photoBucket || APP_CONFIG.foto_bucket || "fantabanda-foto").trim() || "fantabanda-foto";
 function urlWebConfigurata() {
   try {
     const u = WEB_URL ? new URL(WEB_URL) : new URL("./", location.href);
@@ -276,6 +279,84 @@ async function chiama(metodo, percorso, corpo, riprova) {
   return r.json();
 }
 const rpc = (nome, par) => chiama("POST", "/rest/v1/rpc/" + nome, par || {});
+
+function fotoUrl(ref) {
+  ref = String(ref || "").trim();
+  if (!ref) return "";
+  if (/^https?:\/\//i.test(ref)) return ref;
+  if (!ref.startsWith("storage:")) return "";
+  const path = ref.slice(8).split("/").map(encodeURIComponent).join("/");
+  return `${SUPABASE_URL}/storage/v1/object/public/${encodeURIComponent(FOTO_BUCKET)}/${path}`;
+}
+function jwtSub() {
+  try {
+    const t = authSession && authSession.access_token; if (!t) return "";
+    let p = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    p += "=".repeat((4 - p.length % 4) % 4);
+    return String(JSON.parse(atob(p)).sub || "");
+  } catch (_) { return ""; }
+}
+async function riduciFoto(file) {
+  if (!file || !String(file.type || "").startsWith("image/")) throw new Error("Scegli un file immagine.");
+  if (file.size > 8 * 1024 * 1024) throw new Error("La foto supera 8 MB.");
+  const bmp = await createImageBitmap(file), lato = Math.min(bmp.width, bmp.height);
+  const max = 512, canvas = document.createElement("canvas"); canvas.width = max; canvas.height = max;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bmp, (bmp.width-lato)/2, (bmp.height-lato)/2, lato, lato, 0, 0, max, max);
+  if (bmp.close) bmp.close();
+  return await new Promise((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error("Impossibile elaborare la foto.")), "image/jpeg", .88));
+}
+async function storageCaricaFoto(file, prefisso) {
+  if (!authSession || !await authPronto()) throw new Error("Sessione Supabase non valida.");
+  const uid = jwtSub(); if (!uid) throw new Error("Sessione Supabase senza identificativo utente.");
+  const blob = await riduciFoto(file);
+  const safe = String(prefisso || "foto").replace(/[^a-z0-9_-]+/gi, "-").slice(0, 50) || "foto";
+  const rnd = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now()).replace(/[^a-z0-9-]/gi, "");
+  const path = `${uid}/${safe}-${rnd}.jpg`, enc = path.split("/").map(encodeURIComponent).join("/");
+  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${encodeURIComponent(FOTO_BUCKET)}/${enc}`, {
+    method: "POST", headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + authSession.access_token,
+      "Content-Type": "image/jpeg", "x-upsert": "false", "cache-control": "3600" }, body: blob });
+  if (!r.ok) { let m = `Storage ${r.status}`; try { const d=await r.json(); m=d.message||d.error||m; } catch(_){} throw new Error(m); }
+  return "storage:" + path;
+}
+async function storageEliminaFoto(ref) {
+  ref = String(ref || ""); if (!ref.startsWith("storage:") || !authSession) return false;
+  try {
+    await authPronto();
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${encodeURIComponent(FOTO_BUCKET)}`, {
+      method: "DELETE", headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + authSession.access_token, "Content-Type": "application/json" },
+      body: JSON.stringify({ prefixes: [ref.slice(8)] }) });
+    return r.ok || r.status === 404;
+  } catch (_) { return false; }
+}
+async function fotoImposta(tipo, id, file) {
+  let nuovo = null, vecchio = null;
+  if (tipo === "giocatore") { const u = U(id); vecchio = u && u.foto; }
+  else { const m = MUS.get(Number(id)); vecchio = m && m.foto; }
+  try {
+    if (file) nuovo = await storageCaricaFoto(file, `${tipo}-${id}`);
+    const r = await rpc("fm_foto_imposta", { p_tipo: tipo, p_id: String(id), p_foto: nuovo });
+    if (!r || r.ok === false) throw new Error((r && r.errore) || "Foto non salvata.");
+    if (vecchio && vecchio !== nuovo) storageEliminaFoto(vecchio);
+    await carica(); render(); toast(file ? "Foto aggiornata." : "Foto rimossa.");
+  } catch (e) {
+    if (nuovo) await storageEliminaFoto(nuovo);
+    throw e;
+  }
+}
+function controlliFoto(tipo, id, foto, consentito) {
+  if (!consentito) return null;
+  const inp = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp" });
+  const carica = h("button", { class: "n auto", text: "Cambia foto", onclick: async () => {
+    if (!inp.files || !inp.files[0]) return toast("Scegli prima una foto.", true);
+    try { carica.disabled = true; await fotoImposta(tipo, id, inp.files[0]); } catch(e) { toast(e.message, true); } finally { carica.disabled = false; }
+  }});
+  const togli = foto ? h("button", { class: "n auto", text: "Togli foto", onclick: async () => {
+    if (!confirm("Togliere questa foto?")) return;
+    try { await fotoImposta(tipo, id, null); } catch(e) { toast(e.message, true); }
+  }}) : null;
+  return h("div", { class: "blocco" }, h("div", { class: "dim", text: "Foto condivisa Web/Kivy" }), inp, h("div", { class: "riga" }, carica, togli));
+}
 
 let toastT = null;
 function toast(testo, err) {
@@ -584,11 +665,11 @@ function tabella(id, cols, righe, def, opz) {
   if (!tr.length) return h("p", { class: "dim", text: opz.vuoto || "Nessun dato." });
   return h("div", { class: "tab-wrap" }, h("table", null, h("thead", null, h("tr", null, th)), h("tbody", null, tr)));
 }
-const av = nome => h("span", { class: "av", text: String(nome).split(/\s+/).map(p => p[0]).slice(0, 2).join("").toUpperCase() });
-const linkUt = nome => h("a", { href: "#", style: "color:inherit", onclick: ev => { ev.preventDefault(); apri("squadra", null, nome); } }, h("span", { class: "nome" }, av(nome), etichettaUt(nome)));
+const av = (nome, foto) => { const u=fotoUrl(foto); return h("span", { class: "av" }, u ? h("img", { src:u, alt:"" }) : String(nome).split(/\s+/).map(p=>p[0]).slice(0,2).join("").toUpperCase()); };
+const linkUt = nome => { const u=U(nome); return h("a", { href: "#", style: "color:inherit", onclick: ev => { ev.preventDefault(); apri("squadra", null, nome); } }, h("span", { class: "nome" }, av(nome, u && u.foto), etichettaUt(nome))); };
 function cellaMus(m) {
   const extra = [m.soprannome ? m.soprannome : null, mioSopr(m.id) ? "tu: " + mioSopr(m.id) : null].filter(Boolean).join(", ");
-  return h("span", { class: "nome" }, av(m.nome), h("span", null, m.nome, extra ? h("span", { class: "dim", text: " (" + extra + ")" }) : null));
+  return h("span", { class: "nome" }, av(m.nome, m.foto), h("span", null, m.nome, extra ? h("span", { class: "dim", text: " (" + extra + ")" }) : null));
 }
 const puntiTxt = (e) => e.stato === "pending" ? h("span", { class: "pend", text: e.da_approvare && e.proposta_base !== null && e.proposta_base !== undefined ? "DA CONFERMARE" : "PENDING" })
   : h("span", { class: e.punti < 0 ? "neg" : "" , text: sgn(e.punti) + (e.dittatura ? "*" : "") });
@@ -671,8 +752,11 @@ function modaleMusicista(mid) {
   const m = MUS.get(mid); if (!m) return;
   const ev = nascondiDup(eventiRecenti(0, e => e.musicista_id === mid));
   const campi = campiPer("musicisti"), buffs = buffMusicista(m);
+  const fu = fotoUrl(m.foto);
   apriModale(h("div", { class: "card" },
     h("h2", { text: m.nome }),
+    fu ? h("img", { class: "foto-grande", src: fu, alt: m.nome }) : null,
+    admin() ? controlliFoto("musicista", m.id, m.foto, true) : null,
     m.soprannome ? h("p", { class: "dim", text: "Soprannome: " + m.soprannome }) : null,
     h("p", null, "Squadra: ", m.proprietario ? `${m.proprietario} (prezzo ${m.prezzo})` : "nessuna", " - Punti: ", h("b", { text: puntiMus(mid) })),
     campi.length ? h("div", null, campi.map(c => { const v = valProfilo(m, c); return (v === undefined || v === null || v === "") ? null : h("div", { text: `${c.nome}: ${fmt(v)}` }); })) : null,
@@ -695,7 +779,10 @@ VISTE.squadra = function (box) {
   const righe = r.map(m => ({ m, p: puntiMus(m.id, nome) }));
   const ex = tot - righe.reduce((a, x) => a + x.p, 0);
   const cl = classificaGiocatori().find(x => x.nome === nome);
+  const fu = fotoUrl(u && u.foto), puoFoto = admin() || (io && io.ruolo === "giocatore" && io.nome === nome);
   box.append(h("div", { class: "card" }, h("h2", { text: "Squadra" }), sel,
+    fu ? h("img", { class: "foto-grande", src: fu, alt: nome }) : null,
+    controlliFoto("giocatore", nome, u && u.foto, puoFoto),
     h("p", null, `Crediti residui ${crediti(nome)}/${s.budget_iniziale} - musicisti ${r.length}/${s.musicisti_per_squadra}`),
     u && campiG.length ? h("div", { class: "dim" }, campiG.map(c => { const v = valProfilo(u, c); return (v === undefined || v === null || v === "") ? null : h("div", { text: `${c.nome}: ${fmt(v)}` }); })) : null,
     buffsG.length ? h("div", null, h("h3", { text: "Buff / debuff attivi" }), buffsG.map(b => h("div", { class: "dim", text: descriviBonusEsteso(b) }))) : null,
@@ -1114,6 +1201,63 @@ function vistaNuovaProposta(box) {
     prev, h("div", { class: "riga" }, invio), esito));
 }
 
+function snapshotStatisticheD(d) {
+  const ev = (d.eventi || []).filter(e => (e.stato || "ok") === "ok"), gio=(d.utenti||[]).filter(u=>u.gioca), mus=d.musicisti||[];
+  const musMap=new Map(mus.map(m=>[m.id,m])), pm=new Map(), pu=new Map(), pc=new Map();
+  const add=(m,k,v)=>m.set(k,(m.get(k)||0)+Number(v||0));
+  ev.forEach(e=>{ add(pm,e.musicista_id,e.punti); if(e.proprietario){add(pu,e.proprietario,e.punti);add(pc,e.musicista_id+"|"+e.proprietario,e.punti);} });
+  const rose=n=>mus.filter(m=>m.proprietario===n), sp=n=>rose(n).reduce((a,m)=>a+Number(m.prezzo||0),0);
+  const cg0=gio.map(u=>[u.nome,pu.get(u.nome)||0]).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+  const pg=posizioni(cg0.map(x=>x[1])), cg=cg0.map((x,i)=>({pos:pg[i],nome:x[0],punti:x[1]}));
+  const cm0=mus.map(m=>[m,pm.get(m.id)||0]).sort((a,b)=>b[1]-a[1]||a[0].nome.localeCompare(b[0].nome));
+  const pmpos=posizioni(cm0.map(x=>x[1])), cm=cm0.map((x,i)=>({pos:pmpos[i],m:x[0],punti:x[1]}));
+  const budget=Number((d.impostazioni||{}).budget_iniziale||0), spesoTot=gio.reduce((a,u)=>a+sp(u.nome),0), tot=ev.reduce((a,e)=>a+Number(e.punti||0),0);
+  const azMap=new Map(); ev.forEach(e=>{const k=e.azione||"?", x=azMap.get(k)||[0,0];x[0]++;x[1]+=Number(e.punti||0);azMap.set(k,x);});
+  const azioni=[...azMap.entries()].map(([nome,[volte,punti]])=>({nome,volte,punti,media:punti/volte})).sort((a,b)=>b.volte-a.volte||a.nome.localeCompare(b.nome));
+  const pos=ev.filter(e=>Number(e.punti||0)>0), neg=ev.filter(e=>Number(e.punti||0)<0), zero=ev.filter(e=>Number(e.punti||0)===0);
+  let be=0,bce=0,su=0,giu=0; ev.forEach(e=>{if(e.dittatura||e.base===null||e.base===undefined||(!(e.bonus||[]).length&&!(e.bonus_auto||[]).length))return;be++;const z=Number(e.punti||0)-Number(e.base||0);if(z>0)su+=z;else if(z<0)giu+=z;if(z)bce++;});
+  const top0=cm0.slice(0,5), peg0=[...cm0].sort((a,b)=>a[1]-b[1]).slice(0,5), somTop=top0.reduce((a,x)=>a+x[1],0), somPeg=peg0.reduce((a,x)=>a+x[1],0);
+  const mercato=cg.map(r=>{const x=sp(r.nome);return x>0?{nome:r.nome,speso:x,punti:r.punti,resa:r.punti/x}:null;}).filter(Boolean).sort((a,b)=>b.resa-a.resa||a.nome.localeCompare(b.nome));
+  const comprati=mus.filter(m=>m.proprietario&&Number(m.prezzo||0)>0).map(m=>({m,punti:pc.get(m.id+"|"+m.proprietario)||0}));
+  const spTot=comprati.reduce((a,x)=>a+Number(x.m.prezzo||0),0), ptTot=comprati.reduce((a,x)=>a+x.punti,0), resaMedia=spTot?ptTot/spTot:0;
+  const valore=comprati.map(x=>{const atteso=Math.floor(Number(x.m.prezzo||0)*resaMedia);return {nome:x.m.nome,squadra:x.m.proprietario,prezzo:Number(x.m.prezzo||0),punti:x.punti,atteso,delta:x.punti-atteso};}).sort((a,b)=>b.delta-a.delta);
+  const evMini=e=>e?({id:e.id,punti:Number(e.punti||0),musicista:(musMap.get(e.musicista_id)||{}).nome||"?",azione:e.azione||""}):null;
+  return {versione:1,
+    riepilogo:{giocatori:gio.length,musicisti:mus.length,musicisti_acquistati:mus.filter(m=>m.proprietario).length,budget_totale:budget*gio.length,crediti_spesi:spesoTot,
+      eventi:ev.length,eventi_pending:(d.eventi||[]).filter(e=>e.stato==="pending").length,positivi:pos.length,negativi:neg.length,
+      con_bonus:ev.filter(e=>(e.bonus||[]).length||(e.bonus_auto||[]).length).length,dittatura:ev.filter(e=>e.dittatura).length,punti_totali:tot,
+      punti_senza_squadra:ev.filter(e=>!e.proprietario).reduce((a,e)=>a+Number(e.punti||0),0),evento_migliore:evMini(ev.length?ev.reduce((a,b)=>Number(b.punti||0)>Number(a.punti||0)?b:a):null),
+      evento_peggiore:evMini(ev.length?ev.reduce((a,b)=>Number(b.punti||0)<Number(a.punti||0)?b:a):null)},
+    azioni,
+    squadre:cg.map(r=>{const rr=rose(r.nome),x=sp(r.nome);return {pos:r.pos,nome:r.nome,speso:x,budget,punti:r.punti,rosa:rr.length,musicisti:rr.map(m=>m.nome),resa:x?r.punti/x:null,media_musicista:rr.length?r.punti/rr.length:null};}),
+    musicisti:cm.map(r=>({pos:r.pos,id:r.m.id,nome:r.m.nome,squadra:r.m.proprietario,prezzo:r.m.proprietario?Number(r.m.prezzo||0):0,punti:r.punti,resa:r.m.proprietario&&Number(r.m.prezzo||0)?r.punti/Number(r.m.prezzo):null})),
+    distribuzione:{eventi:ev.length,pos_n:pos.length,neg_n:neg.length,zero_n:zero.length,pos_pt:pos.reduce((a,e)=>a+Number(e.punti||0),0),neg_pt:neg.reduce((a,e)=>a+Number(e.punti||0),0),tot_pt:tot},
+    bonus:{eventi_con_bonus:be,eventi_con_effetto:bce,su,giu,netto:su+giu},
+    top:{righe:top0.map((x,i)=>({pos:i+1,nome:x[0].nome,squadra:x[0].proprietario,punti:x[1]})),somma:somTop,totale:tot,perc:tot?100*somTop/tot:null,k:5},
+    peggio:{righe:peg0.map((x,i)=>({pos:i+1,nome:x[0].nome,squadra:x[0].proprietario,punti:x[1]})),somma:somPeg,totale:tot,perc:(tot<0&&somPeg<0)?100*somPeg/tot:null,k:5},
+    mercato,valore:{resa_media:resaMedia,righe:valore}};
+}
+
+function storicoStatistiche(box, x, idx) {
+  const st=x.statistiche;
+  if(!st || typeof st!=="object" || !Object.keys(st).length){
+    box.append(h("div",{class:"card"},h("h2",{text:x.nome+" - statistiche"}),h("p",{class:"dim",text:"Questa stagione è stata archiviata prima dell'introduzione dello snapshot statistico completo. Classifica, eventi e scambi restano conservati; le statistiche complete saranno disponibili per le stagioni chiuse con la nuova versione."})));
+    return;
+  }
+  const r=st.riepilogo||{}, righe=[["Giocatori",r.giocatori],["Musicisti acquistati",`${r.musicisti_acquistati||0}/${r.musicisti||0}`],["Crediti spesi",`${r.crediti_spesi||0}/${r.budget_totale||0}`],["Eventi",r.eventi],["Positivi",r.positivi],["Negativi",r.negativi],["Con bonus/malus",r.con_bonus],["DITTATURA",r.dittatura],["Punti totali",sgn(r.punti_totali||0)],["Punti senza squadra",sgn(r.punti_senza_squadra||0)]];
+  box.append(h("div",{class:"card"},h("h2",{text:x.nome+" - riepilogo statistiche"}),h("table",null,h("tbody",null,righe.map(([a,b])=>h("tr",null,h("td",{text:a}),h("td",{class:"r",text:fmt(b)})))))));
+  box.append(h("div",{class:"card"},h("h2",{text:"Squadre / mercato"}),tabella("hsq"+idx,[{k:"p",t:"Pos",v:z=>z.pos,a:"r"},{k:"n",t:"Giocatore",v:z=>z.nome},{k:"sp",t:"Speso",v:z=>z.speso,a:"r"},{k:"pt",t:"Punti",v:z=>z.punti,a:"r"},{k:"re",t:"Pt/credito",v:z=>z.resa,a:"r",f:v=>v==null?"-":v.toFixed(2)}],st.squadre||[],["p",false])));
+  box.append(h("div",{class:"card"},h("h2",{text:"Musicisti"}),tabella("hm"+idx,[{k:"p",t:"Pos",v:z=>z.pos,a:"r"},{k:"n",t:"Musicista",v:z=>z.nome},{k:"s",t:"Squadra",v:z=>z.squadra||"-"},{k:"pr",t:"Prezzo",v:z=>z.prezzo||null,a:"r"},{k:"pt",t:"Punti",v:z=>z.punti,a:"r"},{k:"re",t:"Pt/credito",v:z=>z.resa,a:"r",f:v=>v==null?"-":v.toFixed(2)}],st.musicisti||[],["p",false])));
+  box.append(h("div",{class:"card"},h("h2",{text:"Tipi di evento"}),tabella("haz"+idx,[{k:"n",t:"Azione",v:z=>z.nome},{k:"v",t:"Volte",v:z=>z.volte,a:"r"},{k:"pt",t:"Punti",v:z=>z.punti,a:"r"},{k:"m",t:"Media",v:z=>z.media,a:"r",f:v=>Number(v||0).toFixed(2)}],st.azioni||[],["v",true])));
+  const b=st.bonus||{},d=st.distribuzione||{};
+  box.append(h("div",{class:"card"},h("h2",{text:"Distribuzione e bonus/malus"}),h("table",null,h("tbody",null,[["Eventi positivi",`${d.pos_n||0} — ${sgn(d.pos_pt||0)} pt`],["Eventi negativi",`${d.neg_n||0} — ${sgn(d.neg_pt||0)} pt`],["Eventi a zero",d.zero_n||0],["Eventi con bonus/malus",b.eventi_con_bonus||0],["Con effetto reale",b.eventi_con_effetto||0],["Punti aggiunti",sgn(b.su||0)],["Punti sottratti",sgn(b.giu||0)],["Effetto netto",sgn(b.netto||0)]].map(([a,c])=>h("tr",null,h("td",{text:a}),h("td",{class:"r",text:String(c)})))))));
+  const top=st.top||{},peg=st.peggio||{};
+  box.append(h("div",{class:"card"},h("h2",{text:"Top 5"}),tabella("htop"+idx,[{k:"p",t:"Pos",v:z=>z.pos,a:"r"},{k:"n",t:"Musicista",v:z=>z.nome},{k:"s",t:"Squadra",v:z=>z.squadra||"-"},{k:"pt",t:"Punti",v:z=>z.punti,a:"r"}],top.righe||[],["p",false]),h("h3",{text:"Peggiori 5"}),tabella("hpeg"+idx,[{k:"p",t:"Pos",v:z=>z.pos,a:"r"},{k:"n",t:"Musicista",v:z=>z.nome},{k:"s",t:"Squadra",v:z=>z.squadra||"-"},{k:"pt",t:"Punti",v:z=>z.punti,a:"r"}],peg.righe||[],["p",false])));
+  box.append(h("div",{class:"card"},h("h2",{text:"Efficienza mercato"}),tabella("hmerc"+idx,[{k:"n",t:"Giocatore",v:z=>z.nome},{k:"sp",t:"Speso",v:z=>z.speso,a:"r"},{k:"pt",t:"Punti",v:z=>z.punti,a:"r"},{k:"r",t:"Pt/credito",v:z=>z.resa,a:"r",f:v=>Number(v||0).toFixed(2)}],st.mercato||[],["r",true])));
+  const vr=st.valore||{};
+  box.append(h("div",{class:"card"},h("h2",{text:`Valore vs resa — media ${Number(vr.resa_media||0).toFixed(2)} pt/credito`}),tabella("hvr"+idx,[{k:"n",t:"Musicista",v:z=>z.nome},{k:"s",t:"Squadra",v:z=>z.squadra||"-"},{k:"pr",t:"Prezzo",v:z=>z.prezzo,a:"r"},{k:"pt",t:"Punti",v:z=>z.punti,a:"r"},{k:"a",t:"Atteso",v:z=>z.atteso,a:"r"},{k:"d",t:"Scarto",v:z=>z.delta,a:"r",f:sgn}],vr.righe||[],["d",true])));
+}
+
 // ----- statistiche -----
 VISTE.stat = function (box) {
   vista.sub = vista.sub || "riepilogo";
@@ -1230,7 +1374,7 @@ VISTE.stat = function (box) {
 // ----- storico -----
 VISTE.storico = function (box) {
   vista.sub = vista.sub || "cumulativa";
-  box.append(sottoMenu([["cumulativa", "Classifica cumulativa"], ["stagioni", "Stagioni archiviate"]], vista.sub));
+  box.append(sottoMenu([["cumulativa", "Classifica cumulativa"], ["stagioni", "Stagioni archiviate"], ["statistiche", "Statistiche"]], vista.sub));
   if (vista.sub === "cumulativa") {
     const dati = classificaCumulativa(), tot = dati.reduce((a, r) => a + r.d.punti, 0);
     return box.append(h("div", { class: "card" }, h("h2", { text: `Classifica cumulativa (${(D.storico || []).length} stagioni archiviate${eventiOk().length ? " + stagione in corso" : ""})` }),
@@ -1246,6 +1390,11 @@ VISTE.storico = function (box) {
   const idx = vista.arg !== null && vista.arg !== undefined && st[vista.arg] ? vista.arg : st.length - 1;
   const sel = h("select", { onchange: ev => { vista.arg = parseInt(ev.target.value, 10); render(); } }, st.map((x, i) => h("option", { value: i, selected: i === idx, text: `${x.nome} (chiusa il ${x.chiusa})` })));
   const x = st[idx];
+  if (vista.sub === "statistiche") {
+    box.append(h("div", { class: "card" }, h("h2", { text: "Statistiche storiche" }), sel));
+    storicoStatistiche(box, x, idx);
+    return;
+  }
   box.append(h("div", { class: "card" }, h("h2", { text: x.nome + " - giocatori" }), sel,
     tabella("sg", [{ k: "pos", t: "Pos", v: r => r.pos, a: "r" }, { k: "n", t: "Giocatore", v: r => r.nome }, { k: "p", t: "Punti", v: r => r.punti, a: "r" },
       { k: "m", t: "Musicisti", v: r => (r.musicisti || []).join(", ") || null, sort: false }], x.classifica, ["pos", false])));
@@ -1297,11 +1446,16 @@ function storicoNormalizza(raw) {
     const musicisti = Array.isArray(x.musicisti) ? x.musicisti.map((r, i) => {
       const n = String((r && r.nome) || "").trim(), p = Number(r && r.punti);
       if (!n || !Number.isFinite(p)) throw new Error(`${nome}: riga musicisti ${i + 1} non valida.`);
-      return { pos: i + 1, nome: n.slice(0, 100), squadra: String(r.squadra || "").trim() || null, punti: p };
+      const prezzo = r && r.prezzo != null ? Number(r.prezzo) : null;
+      if (prezzo != null && !Number.isFinite(prezzo)) throw new Error(`${nome}: prezzo musicista ${i + 1} non valido.`);
+      const out = { pos: i + 1, nome: n.slice(0, 100), squadra: String(r.squadra || "").trim() || null, punti: p };
+      if (prezzo != null) out.prezzo = Math.trunc(prezzo);
+      return out;
     }) : [];
     return { nome, chiusa: String(x.chiusa || "").slice(0, 40), classifica, musicisti,
       eventi: Array.isArray(x.eventi) ? x.eventi : [], scambi: Array.isArray(x.scambi) ? x.scambi : [],
-      nota: String(x.nota || "").slice(0, 500) };
+      nota: String(x.nota || "").slice(0, 500),
+      statistiche: x.statistiche && typeof x.statistiche === "object" && !Array.isArray(x.statistiche) ? x.statistiche : undefined };
   });
   if (!stagioni.length) throw new Error("Nessuna stagione storica trovata.");
   return { formato: "fantabanda-storico-1", stagioni };
@@ -1664,7 +1818,7 @@ function adminVistaUtenti(box, ctx) {
 async function adminEliminaUtente(ctx,u){const d=ctx.dati;if(u.ruolo==="admin"&&d.utenti.filter(x=>x.ruolo==="admin").length<=1)return toast("Deve restare almeno un admin locale.",true);if(!confirm(`Eliminare ${u.nome}? I suoi musicisti torneranno liberi.`))return;try{d.musicisti.forEach(m=>{if(m.proprietario===u.nome){m.proprietario=null;m.prezzo=0;}});d.eventi.forEach(e=>{if(e.proprietario===u.nome)e.proprietario=null;});d.scambi.forEach(x=>{if(x.stato==="proposto"&&(x.da===u.nome||x.a===u.nome))x.stato="annullato";});d.utenti=d.utenti.filter(x=>x!==u);await adminSalva(ctx,"Utente eliminato.");render();}catch(e){toast(e.message,true);}}
 function adminUtenteForm(ctx, utente){const d=ctx.dati,nuovo=!utente,u=utente||{nome:"",ruolo:"partecipante",salt:"",hash:"",gioca:true,profilo:{},preferenze:adminPrefsBase(),saldo:0,recupero:null,password_da_impostare:true}; const campi=[{k:"nome",label:"Nome",value:u.nome,disabled:!nuovo},{k:"ruolo",label:"Ruolo locale",type:"select",options:[["partecipante","Partecipante"],["admin","Admin"]],value:u.ruolo},{k:"gioca",label:"Partecipa alla classifica",type:"checkbox",value:!!u.gioca},{k:"password",label:nuovo?"Password Kivy (minimo 4)":"Nuova password Kivy (vuoto = non cambiare)",type:"password",value:""},...adminProfiloCampi(d,"giocatori",u)];adminForm(nuovo?"Nuovo utente":`Utente: ${u.nome}`,campi,async v=>{const nome=v.nome.trim().replace(/\s+/g," ");if(!nome)throw new Error("Nome obbligatorio.");if(d.utenti.some(x=>x!==u&&x.nome.toLowerCase()===nome.toLowerCase()))throw new Error("Utente già esistente.");if(!nuovo&&u.gioca&&!v.gioca&&d.musicisti.some(m=>m.proprietario===u.nome))throw new Error("Ha musicisti in squadra: svincolali prima.");if(!nuovo&&u.ruolo==="admin"&&v.ruolo!=="admin"&&d.utenti.filter(x=>x.ruolo==="admin").length<=1)throw new Error("Deve restare almeno un admin locale.");if(nuovo&&v.password.length<4)throw new Error("Per un nuovo utente serve una password Kivy di almeno 4 caratteri.");if(nuovo){u.preferenze=adminPrefsBase();d.utenti.push(u);}const vecchio=u.nome;u.nome=nome;u.ruolo=v.ruolo;u.gioca=!!v.gioca;u.profilo=u.profilo||{};u.saldo=Number(u.saldo||0);u.recupero=u.recupero??null;if(v.password){if(v.password.length<4)throw new Error("Password di almeno 4 caratteri.");const hp=await hashPasswordLocale(v.password);u.salt=hp.salt;u.hash=hp.hash;u.password_da_impostare=false;}else if(nuovo){u.salt="";u.hash="";u.password_da_impostare=true;}adminApplicaProfilo(d,"giocatori",u,v);if(!nuovo&&vecchio!==nome){d.musicisti.forEach(m=>{if(m.proprietario===vecchio)m.proprietario=nome;});d.eventi.forEach(e=>{if(e.proprietario===vecchio)e.proprietario=nome;});d.scambi.forEach(x=>{if(x.da===vecchio)x.da=nome;if(x.a===vecchio)x.a=nome;});}await adminSalva(ctx,nuovo?"Utente creato.":"Utente aggiornato.",false);if(u.gioca&&!String(u.codice_asta||"").trim()){const rr=await rpc("fm_auth_rigenera_codice",{p_nome:u.nome});if(!rr.ok)throw new Error(rr.errore||"Utente salvato ma codice non generato.");}await carica();toast(nuovo?"Utente creato.":"Utente aggiornato.");render();});}
 function adminClassifiche(d){const ok=(d.eventi||[]).filter(e=>e.stato==="ok"),pm=new Map(),pg=new Map();ok.forEach(e=>{const p=Number(e.punti||0);pm.set(e.musicista_id,(pm.get(e.musicista_id)||0)+p);if(e.proprietario)pg.set(e.proprietario,(pg.get(e.proprietario)||0)+p);});const posiz=arr=>{let last=null,pos=0;return arr.map((r,i)=>{if(last===null||r.punti!==last){pos=i+1;last=r.punti;}return {...r,pos};});};const cg=posiz((d.utenti||[]).filter(u=>u.gioca).map(u=>({nome:u.nome,punti:pg.get(u.nome)||0})).sort((a,b)=>b.punti-a.punti||a.nome.localeCompare(b.nome)));const cm=posiz((d.musicisti||[]).map(m=>({m,punti:pm.get(m.id)||0})).sort((a,b)=>b.punti-a.punti||a.m.nome.localeCompare(b.m.nome)));return{cg,cm};}
-function adminVistaChiudi(box, ctx){const d=ctx.dati,s=d.impostazioni,pend=d.eventi.filter(e=>e.stato==="pending").length;const card=h("div",{class:"card"},h("h2",{text:"Chiudi stagione"}),h("p",{class:"dim",text:`Archivia '${s.stagione}', classifica, eventi validi e scambi accettati; poi libera le rose e azzera saldi/eventi/scambi. Pending attuali: ${pend}. Prima del salvataggio il browser scarica automaticamente un backup JSON.`}));const nome=h("input",{value:`Stagione ${(d.storico||[]).length+1}`,placeholder:"Nome nuova stagione"}),conf=h("input",{placeholder:"Scrivi CHIUDI"});card.append(h("label",null,"Nome nuova stagione",nome),h("label",null,"Conferma",conf),h("button",{class:"n",text:"CHIUDI E ARCHIVIA",onclick:async()=>{if(conf.value!=="CHIUDI")return toast("Scrivi esattamente CHIUDI.",true);if(!confirm(`Chiudere '${s.stagione}'?`))return;try{scaricaJson(`fantabanda-backup-prima-chiusura-${Date.now()}.json`,{formato:"fantabanda-backup-1",versione:ctx.versione,dati:d});const {cg,cm}=adminClassifiche(d),stamp=new Date();const z=n=>String(n).padStart(2,"0"),chiusa=`${stamp.getFullYear()}-${z(stamp.getMonth()+1)}-${z(stamp.getDate())} ${z(stamp.getHours())}:${z(stamp.getMinutes())}`;d.storico=d.storico||[];d.storico.push({id:adminNuovoId(d,"stagione"),nome:s.stagione,chiusa,classifica:cg.map(r=>({pos:r.pos,nome:r.nome,punti:r.punti,musicisti:d.musicisti.filter(m=>m.proprietario===r.nome).map(m=>m.nome)})),musicisti:cm.map(r=>({pos:r.pos,nome:r.m.nome,squadra:r.m.proprietario,punti:r.punti})),eventi:cloneJson(d.eventi.filter(e=>e.stato==="ok")),scambi:cloneJson(d.scambi.filter(x=>x.stato==="accettato"))});d.eventi=[];d.scambi=[];d.musicisti.forEach(m=>{m.proprietario=null;m.prezzo=0;});d.utenti.forEach(u=>u.saldo=0);s.stagione=nome.value.trim()||`Stagione ${d.storico.length+1}`;await adminSalva(ctx,"Stagione archiviata.");render();}catch(e){toast(e.message,true);}}}));box.append(card);}
+function adminVistaChiudi(box, ctx){const d=ctx.dati,s=d.impostazioni,pend=d.eventi.filter(e=>e.stato==="pending").length;const card=h("div",{class:"card"},h("h2",{text:"Chiudi stagione"}),h("p",{class:"dim",text:`Archivia '${s.stagione}', classifica, eventi validi e scambi accettati; poi libera le rose e azzera saldi/eventi/scambi. Pending attuali: ${pend}. Prima del salvataggio il browser scarica automaticamente un backup JSON.`}));const nome=h("input",{value:`Stagione ${(d.storico||[]).length+1}`,placeholder:"Nome nuova stagione"}),conf=h("input",{placeholder:"Scrivi CHIUDI"});card.append(h("label",null,"Nome nuova stagione",nome),h("label",null,"Conferma",conf),h("button",{class:"n",text:"CHIUDI E ARCHIVIA",onclick:async()=>{if(conf.value!=="CHIUDI")return toast("Scrivi esattamente CHIUDI.",true);if(!confirm(`Chiudere '${s.stagione}'?`))return;try{scaricaJson(`fantabanda-backup-prima-chiusura-${Date.now()}.json`,{formato:"fantabanda-backup-1",versione:ctx.versione,dati:d});const {cg,cm}=adminClassifiche(d),stamp=new Date();const z=n=>String(n).padStart(2,"0"),chiusa=`${stamp.getFullYear()}-${z(stamp.getMonth()+1)}-${z(stamp.getDate())} ${z(stamp.getHours())}:${z(stamp.getMinutes())}`;d.storico=d.storico||[];d.storico.push({id:adminNuovoId(d,"stagione"),nome:s.stagione,chiusa,classifica:cg.map(r=>({pos:r.pos,nome:r.nome,punti:r.punti,musicisti:d.musicisti.filter(m=>m.proprietario===r.nome).map(m=>m.nome)})),musicisti:cm.map(r=>({pos:r.pos,nome:r.m.nome,squadra:r.m.proprietario,prezzo:r.m.prezzo||0,punti:r.punti})),eventi:cloneJson(d.eventi.filter(e=>e.stato==="ok")),scambi:cloneJson(d.scambi.filter(x=>x.stato==="accettato")),statistiche:snapshotStatisticheD(d)});d.eventi=[];d.scambi=[];d.musicisti.forEach(m=>{m.proprietario=null;m.prezzo=0;});d.utenti.forEach(u=>u.saldo=0);s.stagione=nome.value.trim()||`Stagione ${d.storico.length+1}`;await adminSalva(ctx,"Stagione archiviata.");render();}catch(e){toast(e.message,true);}}}));box.append(card);}
 function adminVistaDati(box, ctx){const d=ctx.dati,card=h("div",{class:"card"},h("h2",{text:"Backup, ripristino ed esportazione"}),h("p",{class:"dim",text:"Equivalente web delle funzioni locali Kivy. Il backup completo contiene anche hash password e codici: conservalo privatamente."}));card.append(h("button",{class:"n auto",text:"VERIFICA INTEGRITÀ DATI",onclick:async()=>{try{const r=await rpc("fm_a_verifica_snapshot",{p_dati:d});if(r&&r.valido){toast("Integrità dati: nessun problema rilevato.");}else{const pp=(r&&r.problemi)||[];const msg=pp.length?pp.map(x=>typeof x==="string"?x:JSON.stringify(x)).join("\n"):((r&&r.errore)||"Snapshot non valido.");alert(`Verifica integrità: ${r&&r.numero_problemi!=null?r.numero_problemi:pp.length} problema/i\n\n${msg}`);}}catch(e){toast(e.message,true);}}}));card.append(h("button",{class:"n auto",text:"SCARICA BACKUP JSON COMPLETO",onclick:()=>scaricaJson(`fantabanda-backup-${Date.now()}.json`,{formato:"fantabanda-backup-1",versione:ctx.versione,dati:d})}));const file=h("input",{type:"file",accept:".json,application/json"});const rip=h("button",{class:"n auto",text:"RIPRISTINA BACKUP",onclick:async()=>{try{if(!file.files||!file.files[0])throw new Error("Scegli un file JSON.");const raw=JSON.parse(await file.files[0].text()),nd=raw&&raw.dati?raw.dati:raw;if(!nd||typeof nd!=="object"||!Array.isArray(nd.utenti)||!Array.isArray(nd.musicisti))throw new Error("Backup non riconosciuto.");if(!confirm("Ripristinare questo backup? Lo stato online corrente verrà sostituito."))return;ctx.dati=nd;await adminSalva(ctx,"Backup ripristinato.");render();}catch(e){toast(e.message,true);}}});card.append(h("hr"),h("h3",{text:"Ripristino"}),file,rip,h("hr"),h("h3",{text:"CSV"}));const {cg,cm}=adminClassifiche(d),campG=(d.campi||[]).filter(c=>c.per==="giocatori"),campM=(d.campi||[]).filter(c=>c.per==="musicisti");card.append(h("button",{class:"n auto",text:"CSV CLASSIFICA GIOCATORI",onclick:()=>adminScaricaCsv("classifica_giocatori.csv",["Posizione","Giocatore","Soprannome","Punti","Crediti","Musicisti",...campG.map(c=>c.nome)],cg.map(r=>{const u=d.utenti.find(x=>x.nome===r.nome),sp=d.musicisti.filter(m=>m.proprietario===r.nome).reduce((a,m)=>a+Number(m.prezzo||0),0),cr=Number(d.impostazioni.budget_iniziale)-sp+Number(u.saldo||0);return[r.pos,r.nome,((u.preferenze||{}).soprannome||""),r.punti,cr,d.musicisti.filter(m=>m.proprietario===r.nome).map(m=>m.nome).join(", "),...campG.map(c=>(u.profilo||{})[String(c.id)]??"")];}) )}),h("button",{class:"n auto",text:"CSV CLASSIFICA MUSICISTI",onclick:()=>adminScaricaCsv("classifica_musicisti.csv",["Posizione","Musicista","Soprannome","Squadra","Prezzo","Punti",...campM.map(c=>c.nome)],cm.map(r=>[r.pos,r.m.nome,r.m.soprannome||"",r.m.proprietario||"",r.m.proprietario?r.m.prezzo:"",r.punti,...campM.map(c=>(r.m.profilo||{})[String(c.id)]??"")]))}),h("button",{class:"n auto",text:"CSV EVENTI",onclick:()=>adminScaricaCsv("eventi.csv",["ID","Data","Stato","Musicista","Azione","Ruolo","Punti","Base","Bonus/malus","Voti","Dettaglio","Squadra","DITTATURA","Gruppo","Nota"],d.eventi.map(e=>[e.id,e.data,e.stato,(d.musicisti.find(m=>m.id===e.musicista_id)||{}).nome||"?",e.azione,e.ruolo||"",e.punti,e.base??"",(e.bonus||[]).map(b=>b.nome||"").join(", "),(e.voti||[]).join(" "),e.dettaglio||"",e.proprietario||"",e.dittatura?"sì":"",e.gruppo||"",e.nota||""]))}));box.append(card);}
 
 
