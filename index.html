@@ -279,7 +279,7 @@ document.body.dataset.scala = ls.get("fm_scala", "1");
 // ---------------------------------------------------------------------------------------------
 // Dati e regole (copia in JavaScript delle funzioni di sola lettura di fantamusica.py)
 // ---------------------------------------------------------------------------------------------
-let io = null;                       // {codice, nome, ruolo}
+let io = null;                       // {nome, ruolo}
 let S = { dati: null, prefs: {}, richieste: [], codici: {}, accessi: [], versione: null, vuoto: false };
 let D = null, MUS = new Map(), GRP = new Map(), PT = { mus: new Map(), ut: new Map(), coppie: new Map() };
 const SINGOLARI = { minuti: "minuto", ore: "ora", giorni: "giorno", secondi: "secondo", settimane: "settimana", mesi: "mese", anni: "anno" };
@@ -958,7 +958,7 @@ function vistaProponi(box) {
 function mostraEsito(esitoEl, t, err) { if (esitoEl) { esitoEl.className = "esito " + (err ? "err" : "ok"); esitoEl.textContent = t; } toast(t, err); }
 async function invia(tipo, payload, esitoEl) {
   try {
-    const r = await rpc("fm_invia", { p_codice: io.codice || null, p_tipo: tipo, p_payload: payload });
+    const r = await rpc("fm_invia", { p_tipo: tipo, p_payload: payload });
     if (!r.ok) { mostraEsito(esitoEl, r.errore || r.messaggio || "Richiesta respinta", true); beep(200, 200); carica().catch(() => {}); return false; }
     sporco = false; await carica().catch(() => {});
     mostraEsito(esitoEl, r.messaggio || "Fatto."); beep(660, 70);
@@ -967,7 +967,7 @@ async function invia(tipo, payload, esitoEl) {
 }
 async function opAdmin(tipo, payload, esitoEl) {
   try {
-    const r = await rpc("fm_a_op", { p_admin: io.codice, p_tipo: tipo, p_payload: payload });
+    const r = await rpc("fm_a_op", { p_tipo: tipo, p_payload: payload });
     if (!r.ok) { mostraEsito(esitoEl, r.errore || "Operazione non riuscita", true); beep(200, 200); return false; }
     sporco = false; await carica().catch(() => {});
     mostraEsito(esitoEl, r.messaggio || "Fatto."); beep(660, 70);
@@ -1223,11 +1223,11 @@ VISTE.impost = function (box) {
       const c = cod[s.nome] || "", stato = s.dispositivi ? `${s.dispositivi} dispositivo/i associato/i` : (s.invito_attivo ? "invito pronto" : "da associare");
       const az = h("td");
       az.append(h("button", { class: "n picc", text: "Nuovo codice", onclick: async () => {
-        try { const r = await rpc("fm_auth_rigenera_codice", { p_admin: null, p_nome: s.nome }); if (!r.ok) throw new Error(r.errore); await carica(); toast(`Nuovo codice per ${s.nome}: ${r.codice.slice(0,4)}-${r.codice.slice(4)}`); render(); } catch (e) { toast(e.message, true); }
+        try { const r = await rpc("fm_auth_rigenera_codice", { p_nome: s.nome }); if (!r.ok) throw new Error(r.errore); await carica(); toast(`Nuovo codice per ${s.nome}: ${r.codice.slice(0,4)}-${r.codice.slice(4)}`); render(); } catch (e) { toast(e.message, true); }
       }}));
       if (s.dispositivi) az.append(" ", h("button", { class: "n picc", text: "Disconnetti", onclick: async () => {
         if (!confirm(`Disconnettere i dispositivi associati a ${s.nome}? Dovrà usare un nuovo codice.`)) return;
-        const r = await rpc("fm_auth_disconnetti_giocatore", { p_admin: null, p_nome: s.nome });
+        const r = await rpc("fm_auth_disconnetti_giocatore", { p_nome: s.nome });
         if (!r.ok) return toast(r.errore || "Errore", true); await carica(); render();
       }}));
       tb.append(h("tr", null, h("td", { text: s.nome }), h("td", { text: c ? c.slice(0,4)+"-"+c.slice(4) : "—" }), h("td", { text: stato }), az));
@@ -1299,7 +1299,7 @@ async function disegnaAudit(primaId=null) {
   if (primaId === null) { auditCache = []; root.innerHTML = ""; }
   const attesa = h("p", { class: "dim", text: "Caricamento..." }); root.append(attesa);
   try {
-    const par = { p_admin: null, p_limite: 100 };
+    const par = { p_limite: 100 };
     if (primaId !== null) par.p_prima_id = primaId;
     const r = await rpc("fm_audit_elenco", par);
     if (!r.ok) throw new Error(r.errore || "Errore");
@@ -1418,7 +1418,7 @@ function disegnaAsta() {
 async function rilancia(importo) {
   asEsito("...");
   try {
-    const r = await rpc("asta_rilancia", { p_codice: io.codice || null, p_importo: importo });
+    const r = await rpc("asta_rilancia", { p_importo: importo });
     if (!r.ok) { asEsito(r.errore, true); beep(200, 250); return; }
     asEsito("Offerta di " + importo + " inviata"); const i = $("#as-importo"); if (i) i.value = "";
     caricaAsta().catch(() => {});
@@ -1427,7 +1427,7 @@ async function rilancia(importo) {
 // comandi dell'admin (sessione Supabase Auth)
 async function adminAsta(fn, par, okMsg) {
   try {
-    const r = await rpc(fn, Object.assign({ p_admin: io.codice }, par || {}));
+    const r = await rpc(fn, par || {});
     if (r && r.ok === false) { asEsito(r.errore || "Errore", true); beep(200, 250); return null; }
     if (okMsg) asEsito(okMsg);
     await caricaAsta();
@@ -1457,7 +1457,7 @@ let contoTimer = null;
 function contoAsta(n) {
   clearInterval(contoTimer);
   let k = n;
-  const passo = () => { rpc("asta_a_messaggio", { p_admin: io.codice, p_testo: String(k) }).catch(() => {}); k--; if (k <= 0) clearInterval(contoTimer); };
+  const passo = () => { rpc("asta_a_messaggio", { p_testo: String(k) }).catch(() => {}); k--; if (k <= 0) clearInterval(contoTimer); };
   passo();
   contoTimer = setInterval(passo, 1000);
 }
@@ -1481,7 +1481,7 @@ async function messaggiNuovi() {
 // ---------------------------------------------------------------------------------------------
 let firma = null, occupato = false, ultimoOk = 0, timers = [];
 async function carica() {
-  const r = await rpc("fm_leggi", { p_codice: io.codice || null });
+  const r = await rpc("fm_leggi");
   if (!r.ok) throw new Error(r.errore || "Accesso negato");
   S.vuoto = !!r.vuoto;
   if (!r.vuoto) { S.dati = r.dati; S.versione = r.versione; S.prefs = r.prefs || {}; S.richieste = r.richieste || []; S.codici = r.codici || {}; S.accessi = r.accessi || []; indicizza(); notificaRichieste(); }
@@ -1505,7 +1505,7 @@ async function controlla() {
   } finally { occupato = false; }
 }
 async function completaAccesso(nome, ruolo, codice, viaAuth) {
-  io = { codice: codice || null, nome, ruolo, auth: !!viaAuth };
+  io = { nome, ruolo, auth: !!viaAuth };
   if (viaAuth) ls.del("fm_codice"); else if (codice) ls.set("fm_codice", codice);
   $("#login").classList.add("nascosto"); $("#app").classList.remove("nascosto"); $("#nav").classList.remove("nascosto");
   $("#esci").classList.remove("nascosto");
@@ -1514,7 +1514,7 @@ async function completaAccesso(nome, ruolo, codice, viaAuth) {
   try { await carica(); } catch (e) { $("#app").append(h("div", { class: "card esito err", text: "Errore: " + e.message })); }
   try { const m = await rpc("fm_versione"); ultimoM = m.m; firma = `${m.v}|${m.n}|${m.e}`; controlla.a = m.a; } catch (e) {}
   timers.push(setInterval(controlla, 2500));
-  if (io.ruolo === "giocatore") { const ping = () => rpc("asta_ping", { p_codice: io.codice || null }).catch(() => {}); ping(); timers.push(setInterval(ping, 10000)); }
+  if (io.ruolo === "giocatore") { const ping = () => rpc("asta_ping").catch(() => {}); ping(); timers.push(setInterval(ping, 10000)); }
   return true;
 }
 
