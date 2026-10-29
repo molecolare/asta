@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#010d08">
 <title>FantaBanda</title>
 <style>
   :root { --bg1:#010d08; --bg2:#05381c; --accent:#40ff80; --accent2:#b3ff59; --testo:#b8ffcc; --panel:rgba(5,28,16,.86); --rosso:#ff5a5a; --giallo:#ffd040; --fs:15px; }
@@ -448,9 +449,26 @@ function classificaMusicisti() {
   return dati.map(([m, punti], i) => ({ pos: pos[i], m, punti }));
 }
 function calcolaPunti(base, bonus) {
-  let tot = Math.trunc(base) + bonus.filter(b => b.tipo === "punti").reduce((s, b) => s + Math.trunc(b.valore), 0);
-  const perc = bonus.filter(b => b.tipo === "percentuale").reduce((s, b) => s + Number(b.valore), 0);
-  return tot + Math.floor(tot * perc / 100 + 1e-9);
+  const tot = Math.trunc(base) + bonus.filter(b => b.tipo === "punti").reduce((s, b) => s + Math.trunc(b.valore), 0);
+  // Percentuali sommate e applicate in aritmetica esatta su interi, esattamente come
+  // fantamusica_core.calcola_punti (Fraction) e fm__calcola in SQL (numeric). La vecchia
+  // versione in virgola mobile con +1e-9 poteva dare un punto in piu' rispetto al valore
+  // poi salvato dal server, e l'anteprima avrebbe mostrato un punteggio diverso dal reale.
+  let num = 0n, den = 1n;
+  for (const b of bonus) {
+    if (b.tipo !== "percentuale") continue;
+    const m = /^([+-]?)(\d*)(?:[.,](\d*))?$/.exec(String(b.valore).trim());
+    if (!m) continue;
+    const dec = m[3] || "";
+    const n = BigInt((m[1] === "-" ? "-" : "") + ((m[2] || "0") + dec));
+    const d = 10n ** BigInt(dec.length);
+    num = num * d + n * den; den = den * d;
+  }
+  if (num === 0n) return tot;
+  const a = BigInt(tot) * num, q0 = den * 100n;       // floor(a / q0) verso -infinito
+  let q = a / q0;
+  if (a % q0 !== 0n && (a < 0n) !== (q0 < 0n)) q -= 1n;
+  return tot + Number(q);
 }
 const slotAzione = a => [{ ruolo: a.ruolo || "", punti: a.punti, min: a.min, max: a.max }].concat((a.extra || []).map(x => Object.assign({}, x)));
 function descriviSlot(a, s) {
@@ -967,7 +985,7 @@ VISTE.eventi = function (box) {
     const az=h("select",{onchange:e=>{eventiUI.azione=e.target.value;render();}},azioni.map(x=>h("option",{value:x,selected:x===eventiUI.azione,text:x==="tutte"?"Tutte le azioni":x})));
     const seg=h("select",{onchange:e=>{eventiUI.segno=e.target.value;render();}},[["tutti","Tutti i punteggi"],["positivi","Positivi"],["negativi","Negativi"],["zero","Zero"]].map(([v,t])=>h("option",{value:v,selected:v===eventiUI.segno,text:t})));
     const fq=eventiUI.q.trim().toLowerCase();
-    const ev = nascondiDup(eventiRecenti(0, filtroPeriodo(per), true)).filter(e=>{const m=M(e.musicista_id),testo=[m&&m.nome,e.azione,e.proprietario,e.nota].filter(Boolean).join(" ").toLowerCase(); if(fq&&!testo.includes(fq))return false;if(eventiUI.azione!=="tutte"&&e.azione!==eventiUI.azione)return false;const p=Number(e.punti||0);return eventiUI.segno==="tutti"||(eventiUI.segno==="positivi"&&p>0)||(eventiUI.segno==="negativi"&&p<0)||(eventiUI.segno==="zero"&&p===0);});
+    const ev = nascondiDup(eventiRecenti(0, filtroPeriodo(per), true)).filter(e=>{const m=D.musicisti.find(x=>x.id===e.musicista_id),testo=[m&&m.nome,e.azione,e.proprietario,e.nota].filter(Boolean).join(" ").toLowerCase(); if(fq&&!testo.includes(fq))return false;if(eventiUI.azione!=="tutte"&&e.azione!==eventiUI.azione)return false;const p=Number(e.punti||0);return eventiUI.segno==="tutti"||(eventiUI.segno==="positivi"&&p>0)||(eventiUI.segno==="negativi"&&p<0)||(eventiUI.segno==="zero"&&p===0);});
     box.append(h("div", { class: "card" }, h("h2", { text: "Eventi" }), h("div",{class:"riga"},sel,q,az,seg),
       h("p", { class: "dim", text: `${ev.length} eventi filtrati (${etichettaPeriodo(per)}). Una riga per evento: toccala per i dettagli e il calcolo. Quelle gialle coinvolgono più musicisti.` }),
       tabella("ev", colonneEventi(), ev, ["data", true],
@@ -1637,19 +1655,33 @@ function storicoNormalizza(raw) {
   return { formato: "fantabanda-storico-1", stagioni };
 }
 
+function androidSalvaTesto(nome, testo, tipo) {
+  try {
+    const b = window.FantaBandaAndroid;
+    if (!b || typeof b.saveTextFile !== "function") return false;
+    b.saveTextFile(String(nome || "fantabanda.txt"), String(tipo || "text/plain;charset=utf-8"), String(testo ?? ""));
+    return true;
+  } catch (_) { return false; }
+}
+
 function scaricaJson(nome, dati) {
-  const blob = new Blob([JSON.stringify(dati, null, 2)], { type: "application/json;charset=utf-8" });
+  const testo = JSON.stringify(dati, null, 2);
+  if (androidSalvaTesto(nome, testo, "application/json;charset=utf-8")) return;
+  const blob = new Blob([testo], { type: "application/json;charset=utf-8" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = nome;
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+const PBKDF2_GIRI = 600000;   // allineato a fantamusica_core.PBKDF2_GIRI (raccomandazione OWASP)
 async function hashPasswordLocale(password) {
   if (!window.crypto || !crypto.subtle) throw new Error("Questo browser non supporta la creazione sicura della password locale.");
-  const b = new Uint8Array(8); crypto.getRandomValues(b);
-  const salt = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+  // 16 byte di sale e il numero di giri scritto nel sale stesso, così Kivy sa come rileggerlo
+  // e le password vecchie (sale solo esadecimale = 100000 giri) restano valide.
+  const b = new Uint8Array(16); crypto.getRandomValues(b);
+  const salt = PBKDF2_GIRI + "$" + [...b].map(x => x.toString(16).padStart(2, "0")).join("");
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: enc.encode(salt), iterations: 100000, hash: "SHA-256" }, key, 256);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: enc.encode(salt), iterations: PBKDF2_GIRI, hash: "SHA-256" }, key, 256);
   const hash = [...new Uint8Array(bits)].map(x => x.toString(16).padStart(2, "0")).join("");
   return { salt, hash };
 }
@@ -1872,7 +1904,7 @@ function adminDescrBonus(b, d) {
   return `${val} · ${dest} · ${b.durata || "permanente"}`;
 }
 function adminCsv(testo) { const s=String(testo??""); return /[;"\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }
-function scaricaTesto(nome, testo, tipo="text/plain;charset=utf-8") { const blob=new Blob([testo],{type:tipo}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=nome; document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
+function scaricaTesto(nome, testo, tipo="text/plain;charset=utf-8") { if(androidSalvaTesto(nome,testo,tipo)) return; const blob=new Blob([testo],{type:tipo}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=nome; document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
 function adminScaricaCsv(nome, headers, rows) { const txt="\ufeff"+[headers,...rows].map(r=>r.map(adminCsv).join(";")).join("\r\n")+"\r\n"; scaricaTesto(nome,txt,"text/csv;charset=utf-8"); }
 
 async function disegnaAdminGestione(box, tipo) {
