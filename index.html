@@ -165,7 +165,7 @@ function urlWebConfigurata() {
 }
 document.title = APP_NAME;
 const _titoloApp = document.querySelector("header h1"); if (_titoloApp) _titoloApp.textContent = "> " + APP_NAME.toUpperCase() + "_";
-function configPronta() { return /^https:\/\/.+\.supabase\.co$/i.test(SUPABASE_URL) && SUPABASE_KEY.length >= 20; }
+function configPronta() { try { const u = new URL(SUPABASE_URL); return u.protocol === "https:" && !!u.hostname && SUPABASE_KEY.length >= 20; } catch (_) { return false; } }
 function richiediConfig() { if (!configPronta()) throw new Error("Configura fantabanda_config.js con supabaseUrl e supabaseKey (publishable key, oppure la legacy anon key)."); }
 
 // ---------------------------------------------------------------------------------------------
@@ -579,6 +579,69 @@ function classificaCumulativa() {
   const pos = posizioni(righe.map(x => x[1].punti));
   return righe.map(([nome, d], i) => ({ pos: pos[i], nome, d }));
 }
+
+
+// Statistiche storiche permanenti: usano solo stagioni archiviate e non influenzano il gioco corrente.
+const nHist = (v, d=0) => (v===null || v===undefined || v==="") ? d : (Number.isFinite(Number(v)) ? Number(v) : d);
+function storicoCarrieraGiocatori() {
+  const agg = new Map();
+  (D.storico || []).forEach(st => (Array.isArray(st.classifica) ? st.classifica : []).forEach((r,i) => {
+    const nome=String(r.nome||"").trim(); if(!nome)return; const k=nome.toLocaleLowerCase(), pos=nHist(r.pos,i+1)>0?nHist(r.pos,i+1):i+1, punti=nHist(r.punti);
+    const x=agg.get(k)||{nome,stagioni:0,titoli:0,podi:0,secondi:0,terzi:0,punti:0,somma_pos:0,miglior_pos:null,miglior_punteggio:null,peggior_punteggio:null,stagione_migliore:null,stagione_peggiore:null};
+    x.stagioni++; x.titoli+=pos===1?1:0; x.podi+=pos<=3?1:0; x.secondi+=pos===2?1:0; x.terzi+=pos===3?1:0; x.punti+=punti; x.somma_pos+=pos; x.miglior_pos=x.miglior_pos==null?pos:Math.min(x.miglior_pos,pos);
+    if(x.miglior_punteggio==null||punti>x.miglior_punteggio){x.miglior_punteggio=punti;x.stagione_migliore=st.nome||"Stagione";}
+    if(x.peggior_punteggio==null||punti<x.peggior_punteggio){x.peggior_punteggio=punti;x.stagione_peggiore=st.nome||"Stagione";}
+    agg.set(k,x);
+  }));
+  return [...agg.values()].map(x=>({...x,media:x.punti/(x.stagioni||1),media_pos:x.somma_pos/(x.stagioni||1)}))
+    .sort((a,b)=>b.titoli-a.titoli||b.podi-a.podi||b.punti-a.punti||a.nome.localeCompare(b.nome));
+}
+function storicoCarrieraMusicisti() {
+  const agg=new Map();
+  (D.storico||[]).forEach(st=>(Array.isArray(st.musicisti)?st.musicisti:[]).forEach((r,i)=>{
+    const nome=String(r.nome||"").trim(); if(!nome)return; const k=nome.toLocaleLowerCase(),pos=nHist(r.pos,i+1)>0?nHist(r.pos,i+1):i+1,punti=nHist(r.punti),prezzo=nHist(r.prezzo),squadra=String(r.squadra||"").trim();
+    const x=agg.get(k)||{nome,stagioni:0,vittorie:0,podi:0,punti:0,somma_pos:0,miglior_pos:null,miglior_punteggio:null,peggior_punteggio:null,stagione_migliore:null,stagione_peggiore:null,prezzo_totale:0,prezzi_n:0,squadre:new Set()};
+    x.stagioni++;x.vittorie+=pos===1?1:0;x.podi+=pos<=3?1:0;x.punti+=punti;x.somma_pos+=pos;x.miglior_pos=x.miglior_pos==null?pos:Math.min(x.miglior_pos,pos);
+    if(x.miglior_punteggio==null||punti>x.miglior_punteggio){x.miglior_punteggio=punti;x.stagione_migliore=st.nome||"Stagione";}
+    if(x.peggior_punteggio==null||punti<x.peggior_punteggio){x.peggior_punteggio=punti;x.stagione_peggiore=st.nome||"Stagione";}
+    if(prezzo>0){x.prezzo_totale+=prezzo;x.prezzi_n++;} if(squadra)x.squadre.add(squadra); agg.set(k,x);
+  }));
+  return [...agg.values()].map(x=>({...x,media:x.punti/(x.stagioni||1),media_pos:x.somma_pos/(x.stagioni||1),prezzo_medio:x.prezzi_n?x.prezzo_totale/x.prezzi_n:null,squadre:[...x.squadre].sort(),squadre_n:x.squadre.size}))
+    .sort((a,b)=>b.vittorie-a.vittorie||b.podi-a.podi||b.punti-a.punti||a.nome.localeCompare(b.nome));
+}
+function storicoAndamento(nome,tipo="giocatore"){
+  const k=String(nome||"").trim().toLocaleLowerCase(),chiave=tipo==="giocatore"?"classifica":"musicisti",out=[];
+  if(!k)return out;
+  (D.storico||[]).forEach(st=>{const rr=Array.isArray(st[chiave])?st[chiave]:[],r=rr.find(x=>x&&String(x.nome||"").trim().toLocaleLowerCase()===k);if(!r)return;const x={stagione:st.nome||"Stagione",chiusa:st.chiusa||"-",pos:nHist(r.pos,null),punti:nHist(r.punti)};if(tipo!=="giocatore"){x.squadra=r.squadra||null;const p=nHist(r.prezzo);x.prezzo=p>0?p:null;}out.push(x);});
+  return out;
+}
+let storicoAndamentoSel=[null,null];
+
+function storicoMetricheStagione(st){
+  const cl=(st.classifica||[]).filter(x=>x&&typeof x==="object"),mus=(st.musicisti||[]).filter(x=>x&&typeof x==="object"),ev=(st.eventi||[]).filter(x=>x&&typeof x==="object"),sc=(st.scambi||[]).filter(x=>x&&typeof x==="object"),ss=st.statistiche&&typeof st.statistiche==="object"?st.statistiche:{},rie=ss.riepilogo&&typeof ss.riepilogo==="object"?ss.riepilogo:{},bonus=ss.bonus&&typeof ss.bonus==="object"?ss.bonus:{},valore=ss.valore&&typeof ss.valore==="object"?ss.valore:{},vr=Array.isArray(valore.righe)?valore.righe:[];
+  const co=[...cl].sort((a,b)=>nHist(a.pos,1e9)-nHist(b.pos,1e9)||nHist(b.punti)-nHist(a.punti)),mo=[...mus].sort((a,b)=>nHist(a.pos,1e9)-nHist(b.pos,1e9)||nHist(b.punti)-nHist(a.punti)),vinc=co[0]||null,topm=mo[0]||null,prezzi=mus.map(x=>nHist(x.prezzo)).filter(x=>x>0);
+  const puntiTot=Number.isFinite(Number(rie.punti_totali))?Number(rie.punti_totali):mus.reduce((a,x)=>a+nHist(x.punti),0), cred=Number.isFinite(Number(rie.crediti_spesi))?Number(rie.crediti_spesi):prezzi.reduce((a,x)=>a+x,0),acq=Number.isFinite(Number(rie.musicisti_acquistati))?Number(rie.musicisti_acquistati):mus.filter(x=>x.squadra&&nHist(x.prezzo)>0).length;
+  const best=vr.length?[...vr].sort((a,b)=>nHist(b.delta)-nHist(a.delta))[0]:null,worst=vr.length?[...vr].sort((a,b)=>nHist(a.delta)-nHist(b.delta))[0]:null;
+  return {nome:st.nome||"Stagione",chiusa:st.chiusa||"-",vincitore:vinc?vinc.nome:null,punti_vincitore:vinc?nHist(vinc.punti):null,margine:co.length>=2?nHist(co[0].punti)-nHist(co[1].punti):null,giocatori:cl.length,musicisti:mus.length,
+    eventi:Number.isFinite(Number(rie.eventi))?Number(rie.eventi):ev.length,scambi:sc.length,punti_totali:puntiTot,crediti_spesi:cred,musicisti_acquistati:acq,
+    positivi:Number.isFinite(Number(rie.positivi))?Number(rie.positivi):ev.filter(x=>nHist(x.punti)>0).length,negativi:Number.isFinite(Number(rie.negativi))?Number(rie.negativi):ev.filter(x=>nHist(x.punti)<0).length,
+    bonus_netto:Number.isFinite(Number(bonus.netto))?Number(bonus.netto):null,miglior_musicista:topm?topm.nome:null,punti_miglior_musicista:topm?nHist(topm.punti):null,prezzo_massimo:prezzi.length?Math.max(...prezzi):null,
+    miglior_affare:best?best.nome:null,delta_miglior_affare:best?nHist(best.delta):null,peggior_affare:worst?worst.nome:null,delta_peggior_affare:worst?nHist(worst.delta):null};
+}
+function storicoAffari(limite=10){
+  const rows=[];(D.storico||[]).forEach(st=>{const ss=st.statistiche&&typeof st.statistiche==="object"?st.statistiche:{},vr=ss.valore&&Array.isArray(ss.valore.righe)?ss.valore.righe:[];vr.forEach(x=>{if(x&&x.nome)rows.push({stagione:st.nome||"Stagione",nome:x.nome,squadra:x.squadra||null,prezzo:nHist(x.prezzo),punti:nHist(x.punti),atteso:nHist(x.atteso),delta:nHist(x.delta)});});});
+  limite=Math.max(1,Number(limite)||10);return {migliori:[...rows].sort((a,b)=>b.delta-a.delta||a.nome.localeCompare(b.nome)||a.stagione.localeCompare(b.stagione)).slice(0,limite),peggiori:[...rows].sort((a,b)=>a.delta-b.delta||a.nome.localeCompare(b.nome)||a.stagione.localeCompare(b.stagione)).slice(0,limite),disponibili:rows.length};
+}
+
+function storicoRecord(){
+  const hist=D.storico||[],cg=storicoCarrieraGiocatori(),out=[],add=(cat,record,protagonista,valore,stagione="-")=>{if(protagonista!==null&&protagonista!==undefined&&protagonista!=="")out.push({categoria:cat,record,protagonista,valore,stagione:stagione||"-"});};
+  const ties=(rows,key,maxi=true)=>{const vals=rows.map(x=>x[key]).filter(Number.isFinite);if(!vals.length)return[null,[]];const v=maxi?Math.max(...vals):Math.min(...vals);return[v,rows.filter(x=>x[key]===v)];};
+  if(cg.length){let v,r;[v,r]=ties(cg,"titoli");add("Giocatori","Più titoli",r.map(x=>x.nome).join(", "),`${v} titoli`);[v,r]=ties(cg,"podi");add("Giocatori","Più podi",r.map(x=>x.nome).join(", "),`${v} podi`);[v,r]=ties(cg,"punti");add("Giocatori","Più punti in carriera",r.map(x=>x.nome).join(", "),`${sgn(v)} pt`);[v,r]=ties(cg,"media");add("Giocatori","Miglior media per stagione",r.map(x=>x.nome).join(", "),`${v>=0?"+":""}${v.toFixed(2)} pt`);}
+  const pg=[],pm=[],marg=[],prezzi=[],aff=[],evs=[],scs=[];
+  hist.forEach(st=>{const sn=st.nome||"Stagione",cl=(st.classifica||[]).filter(x=>x&&x.nome),mus=(st.musicisti||[]).filter(x=>x&&x.nome);cl.forEach(x=>pg.push({nome:x.nome,punti:nHist(x.punti),stagione:sn}));const co=[...cl].sort((a,b)=>nHist(b.punti)-nHist(a.punti)||String(a.nome).localeCompare(String(b.nome)));if(co.length>=2)marg.push({nome:co[0].nome,valore:nHist(co[0].punti)-nHist(co[1].punti),stagione:sn});mus.forEach(x=>{pm.push({nome:x.nome,punti:nHist(x.punti),stagione:sn});if(nHist(x.prezzo)>0)prezzi.push({nome:x.nome,prezzo:nHist(x.prezzo),stagione:sn});});const ss=st.statistiche&&typeof st.statistiche==="object"?st.statistiche:{},vr=ss.valore&&Array.isArray(ss.valore.righe)?ss.valore.righe:[];vr.forEach(x=>{if(x&&x.nome)aff.push({nome:x.nome,delta:nHist(x.delta),stagione:sn});});const rn=ss.riepilogo&&Number.isFinite(Number(ss.riepilogo.eventi))?Number(ss.riepilogo.eventi):Array.isArray(st.eventi)?st.eventi.length:0;evs.push({nome:sn,valore:rn});scs.push({nome:sn,valore:Array.isArray(st.scambi)?st.scambi.length:0});});
+  if(pg.length){let x=[...pg].sort((a,b)=>b.punti-a.punti)[0];add("Giocatori","Punteggio più alto in una stagione",x.nome,`${sgn(x.punti)} pt`,x.stagione);x=[...pg].sort((a,b)=>a.punti-b.punti)[0];add("Giocatori","Punteggio più basso in una stagione",x.nome,`${sgn(x.punti)} pt`,x.stagione);}if(marg.length){const x=[...marg].sort((a,b)=>b.valore-a.valore)[0];add("Giocatori","Vittoria con maggior margine",x.nome,`${sgn(x.valore)} pt`,x.stagione);}if(pm.length){let x=[...pm].sort((a,b)=>b.punti-a.punti)[0];add("Musicisti","Miglior punteggio in una stagione",x.nome,`${sgn(x.punti)} pt`,x.stagione);x=[...pm].sort((a,b)=>a.punti-b.punti)[0];add("Musicisti","Peggior punteggio in una stagione",x.nome,`${sgn(x.punti)} pt`,x.stagione);}if(prezzi.length){const x=[...prezzi].sort((a,b)=>b.prezzo-a.prezzo)[0];add("Mercato","Prezzo d'asta più alto",x.nome,`${x.prezzo} crediti`,x.stagione);}if(aff.length){let x=[...aff].sort((a,b)=>b.delta-a.delta)[0];add("Mercato","Miglior affare vs atteso",x.nome,`${sgn(x.delta)} pt`,x.stagione);x=[...aff].sort((a,b)=>a.delta-b.delta)[0];add("Mercato","Peggior affare vs atteso",x.nome,`${sgn(x.delta)} pt`,x.stagione);}if(evs.length){const v=Math.max(...evs.map(x=>x.valore));add("Stagioni","Più eventi",evs.filter(x=>x.valore===v).map(x=>x.nome).join(", "),`${v} eventi`);}if(scs.length){const v=Math.max(...scs.map(x=>x.valore));add("Stagioni","Più scambi conclusi",scs.filter(x=>x.valore===v).map(x=>x.nome).join(", "),`${v} scambi`);}return out;
+}
+let storicoConfronto=[null,null];
 
 // ---------------------------------------------------------------------------------------------
 // Statistiche avanzate (copia in JS delle funzioni pure di fantamusica_core.py)
@@ -1374,7 +1437,8 @@ VISTE.stat = function (box) {
 // ----- storico -----
 VISTE.storico = function (box) {
   vista.sub = vista.sub || "cumulativa";
-  box.append(sottoMenu([["cumulativa", "Classifica cumulativa"], ["stagioni", "Stagioni archiviate"], ["statistiche", "Statistiche"]], vista.sub));
+  box.append(sottoMenu([["cumulativa", "Classifica cumulativa"], ["stagioni", "Stagioni archiviate"], ["statistiche", "Statistiche stagione"],
+    ["carriera_g", "Carriera giocatori"], ["carriera_m", "Carriera musicisti"], ["andamento", "Andamento"], ["record", "Record"], ["hall", "Hall of Fame"], ["confronto", "Confronto"]], vista.sub));
   if (vista.sub === "cumulativa") {
     const dati = classificaCumulativa(), tot = dati.reduce((a, r) => a + r.d.punti, 0);
     return box.append(h("div", { class: "card" }, h("h2", { text: `Classifica cumulativa (${(D.storico || []).length} stagioni archiviate${eventiOk().length ? " + stagione in corso" : ""})` }),
@@ -1387,6 +1451,51 @@ VISTE.storico = function (box) {
   }
   const st = D.storico || [];
   if (!st.length) return box.append(h("div", { class: "card" }, h("p", { text: "Nessuna stagione archiviata." })));
+
+  if(vista.sub==="carriera_g"){
+    const d=storicoCarrieraGiocatori();
+    return box.append(h("div",{class:"card"},h("h2",{text:"Carriera giocatori"}),h("p",{class:"dim",text:"Solo stagioni concluse. Ordinamento Hall of Fame: titoli → podi → punti."}),
+      tabella("hcarg",[{k:"n",t:"Giocatore",v:x=>x.nome},{k:"st",t:"Stagioni",v:x=>x.stagioni,a:"r"},{k:"ti",t:"Titoli",v:x=>x.titoli,a:"r"},{k:"po",t:"Podi",v:x=>x.podi,a:"r"},{k:"pt",t:"Punti",v:x=>x.punti,a:"r"},{k:"me",t:"Media",v:x=>x.media,a:"r",f:v=>v.toFixed(1)},{k:"mp",t:"Pos media",v:x=>x.media_pos,a:"r",f:v=>v.toFixed(2)},{k:"best",t:"Migliore",v:x=>x.miglior_punteggio,sort:false,f:(v,x)=>`${sgn(v)} · ${x.stagione_migliore}`},{k:"worst",t:"Peggiore",v:x=>x.peggior_punteggio,sort:false,f:(v,x)=>`${sgn(v)} · ${x.stagione_peggiore}`}],d,["ti",true])));
+  }
+  if(vista.sub==="carriera_m"){
+    const d=storicoCarrieraMusicisti();
+    return box.append(h("div",{class:"card"},h("h2",{text:"Carriera musicisti"}),h("p",{class:"dim",text:"I prezzi medi usano soltanto le stagioni che conservano un prezzo d'asta."}),
+      tabella("hcarm",[{k:"n",t:"Musicista",v:x=>x.nome},{k:"st",t:"Stagioni",v:x=>x.stagioni,a:"r"},{k:"vi",t:"1° posti",v:x=>x.vittorie,a:"r"},{k:"po",t:"Podi",v:x=>x.podi,a:"r"},{k:"pt",t:"Punti",v:x=>x.punti,a:"r"},{k:"me",t:"Media",v:x=>x.media,a:"r",f:v=>v.toFixed(1)},{k:"pr",t:"Prezzo medio",v:x=>x.prezzo_medio,a:"r",f:v=>v==null?"-":v.toFixed(1)},{k:"sq",t:"Squadre",v:x=>x.squadre.join(", ")||"-",sort:false}],d,["vi",true])));
+  }
+  if(vista.sub==="andamento"){
+    const cg=storicoCarrieraGiocatori(),cm=storicoCarrieraMusicisti(),wrap=h("div");
+    if(cg.length){const nomi=cg.map(x=>x.nome);if(!nomi.includes(storicoAndamentoSel[0]))storicoAndamentoSel[0]=nomi[0];const sel=h("select",{onchange:e=>{storicoAndamentoSel[0]=e.target.value;render();}},nomi.map(n=>h("option",{value:n,selected:n===storicoAndamentoSel[0],text:n}))),d=storicoAndamento(storicoAndamentoSel[0],"giocatore").map((x,i)=>({...x,_ord:i}));wrap.append(h("div",{class:"card"},h("h2",{text:"Andamento giocatore"}),sel,tabella("handg",[{k:"s",t:"Stagione",v:x=>x.stagione,ord:x=>x._ord},{k:"p",t:"Pos",v:x=>x.pos,a:"r"},{k:"pt",t:"Punti",v:x=>x.punti,a:"r"},{k:"r",t:"Risultato",v:x=>x.pos===1?"TITOLO":x.pos&&x.pos<=3?"PODIO":"-"}],d,["s",false])));}
+    if(cm.length){const nomi=cm.map(x=>x.nome);if(!nomi.includes(storicoAndamentoSel[1]))storicoAndamentoSel[1]=nomi[0];const sel=h("select",{onchange:e=>{storicoAndamentoSel[1]=e.target.value;render();}},nomi.map(n=>h("option",{value:n,selected:n===storicoAndamentoSel[1],text:n}))),d=storicoAndamento(storicoAndamentoSel[1],"musicista").map((x,i)=>({...x,_ord:i}));wrap.append(h("div",{class:"card"},h("h2",{text:"Andamento musicista"}),sel,tabella("handm",[{k:"s",t:"Stagione",v:x=>x.stagione,ord:x=>x._ord},{k:"p",t:"Pos",v:x=>x.pos,a:"r"},{k:"pt",t:"Punti",v:x=>x.punti,a:"r"},{k:"sq",t:"Squadra",v:x=>x.squadra||"-"},{k:"pr",t:"Prezzo",v:x=>x.prezzo,a:"r",f:v=>v==null?"-":v}],d,["s",false])));}
+    if(!cg.length&&!cm.length)wrap.append(h("div",{class:"card"},h("p",{text:"Lo storico non contiene ancora dati di carriera."})));
+    return box.append(wrap);
+  }
+  if(vista.sub==="record"){
+    const d=storicoRecord(),a=storicoAffari(10);
+    box.append(h("div",{class:"card"},h("h2",{text:"Record storici"}),h("p",{class:"dim",text:"Sono mostrati soltanto record supportati dai dati realmente archiviati."}),
+      tabella("hrec",[{k:"c",t:"Categoria",v:x=>x.categoria},{k:"r",t:"Record",v:x=>x.record},{k:"p",t:"Protagonista",v:x=>x.protagonista},{k:"v",t:"Valore",v:x=>x.valore},{k:"s",t:"Stagione",v:x=>x.stagione}],d,["c",false])));
+    if(a.disponibili){
+      box.append(h("div",{class:"card"},h("h2",{text:"Migliori acquisti storici"}),tabella("haffb",[{k:"n",t:"Musicista",v:x=>x.nome},{k:"s",t:"Stagione",v:x=>x.stagione},{k:"sq",t:"Squadra",v:x=>x.squadra||"-"},{k:"pr",t:"Prezzo",v:x=>x.prezzo,a:"r"},{k:"pt",t:"Punti",v:x=>x.punti,a:"r"},{k:"a",t:"Atteso",v:x=>x.atteso,a:"r"},{k:"d",t:"Scarto",v:x=>x.delta,a:"r",f:sgn}],a.migliori,["d",true])));
+      return box.append(h("div",{class:"card"},h("h2",{text:"Peggiori acquisti storici"}),tabella("haffw",[{k:"n",t:"Musicista",v:x=>x.nome},{k:"s",t:"Stagione",v:x=>x.stagione},{k:"sq",t:"Squadra",v:x=>x.squadra||"-"},{k:"pr",t:"Prezzo",v:x=>x.prezzo,a:"r"},{k:"pt",t:"Punti",v:x=>x.punti,a:"r"},{k:"a",t:"Atteso",v:x=>x.atteso,a:"r"},{k:"d",t:"Scarto",v:x=>x.delta,a:"r",f:sgn}],a.peggiori,["d",false])));
+    }
+    return box.append(h("div",{class:"card"},h("p",{class:"dim",text:"Migliori/peggiori acquisti saranno disponibili per le stagioni che contengono lo snapshot valore/resa."})));
+  }
+  if(vista.sub==="hall"){
+    const g=storicoCarrieraGiocatori().slice(0,10).map((x,i)=>({...x,_hall_pos:i+1})),m=storicoCarrieraMusicisti().slice(0,10).map((x,i)=>({...x,_hall_pos:i+1}));
+    box.append(h("div",{class:"card"},h("h2",{text:"Hall of Fame - giocatori"}),h("p",{class:"dim",text:"Criterio trasparente: titoli → podi → punti. Nessun punteggio artificiale."}),tabella("hhg",[{k:"p",t:"Pos",v:x=>x._hall_pos,a:"r",sort:false},{k:"n",t:"Giocatore",v:x=>x.nome},{k:"t",t:"Titoli",v:x=>x.titoli,a:"r"},{k:"po",t:"Podi",v:x=>x.podi,a:"r"},{k:"pt",t:"Punti",v:x=>x.punti,a:"r"},{k:"st",t:"Stagioni",v:x=>x.stagioni,a:"r"}],g,["t",true])));
+    return box.append(h("div",{class:"card"},h("h2",{text:"Hall of Fame - musicisti"}),h("p",{class:"dim",text:"Criterio: vittorie → podi → punti."}),tabella("hhm",[{k:"p",t:"Pos",v:x=>x._hall_pos,a:"r",sort:false},{k:"n",t:"Musicista",v:x=>x.nome},{k:"v",t:"Vittorie",v:x=>x.vittorie,a:"r"},{k:"po",t:"Podi",v:x=>x.podi,a:"r"},{k:"pt",t:"Punti",v:x=>x.punti,a:"r"},{k:"st",t:"Stagioni",v:x=>x.stagioni,a:"r"}],m,["v",true])));
+  }
+  if(vista.sub==="confronto"){
+    if(st.length<2)return box.append(h("div",{class:"card"},h("p",{text:"Servono almeno due stagioni archiviate per il confronto."})));
+    if(!Number.isInteger(storicoConfronto[0])||!st[storicoConfronto[0]])storicoConfronto[0]=st.length-2;
+    if(!Number.isInteger(storicoConfronto[1])||!st[storicoConfronto[1]])storicoConfronto[1]=st.length-1;
+    const sel=i=>h("select",{onchange:e=>{storicoConfronto[i]=parseInt(e.target.value,10);render();}},st.map((x,j)=>h("option",{value:j,selected:j===storicoConfronto[i],text:x.nome})));
+    const a=storicoMetricheStagione(st[storicoConfronto[0]]),b=storicoMetricheStagione(st[storicoConfronto[1]]),pt=v=>v==null?"-":sgn(v),aff=(m,k)=>m[k]?`${m[k]} (${pt(m["delta_"+k])})`:"-";
+    const rows=[["Vincitore",a.vincitore||"-",b.vincitore||"-"],["Punti vincitore",pt(a.punti_vincitore),pt(b.punti_vincitore)],["Margine sul 2°",pt(a.margine),pt(b.margine)],["Giocatori",a.giocatori,b.giocatori],["Musicisti",a.musicisti,b.musicisti],["Eventi",a.eventi,b.eventi],["Scambi conclusi",a.scambi,b.scambi],["Punti totali",pt(a.punti_totali),pt(b.punti_totali)],["Crediti spesi",a.crediti_spesi,b.crediti_spesi],["Musicisti acquistati",a.musicisti_acquistati,b.musicisti_acquistati],["Eventi positivi",a.positivi,b.positivi],["Eventi negativi",a.negativi,b.negativi],["Effetto bonus netto",pt(a.bonus_netto),pt(b.bonus_netto)],["Miglior musicista",`${a.miglior_musicista||"-"} (${pt(a.punti_miglior_musicista)})`,`${b.miglior_musicista||"-"} (${pt(b.punti_miglior_musicista)})`],["Prezzo massimo",a.prezzo_massimo??"-",b.prezzo_massimo??"-"],["Miglior affare",aff(a,"miglior_affare"),aff(b,"miglior_affare")],["Peggior affare",aff(a,"peggior_affare"),aff(b,"peggior_affare")]];
+    const corpo=rows.map(r=>h("tr",null,h("td",{text:r[0]}),h("td",{class:"r",text:String(r[1])}),h("td",{class:"r",text:String(r[2])})));
+    const tab=h("table",null,h("thead",null,h("tr",null,h("th",{text:"Metrica"}),h("th",{text:a.nome}),h("th",{text:b.nome}))),h("tbody",null,corpo));
+    return box.append(h("div",{class:"card"},h("h2",{text:"Confronto tra stagioni"}),h("div",{class:"riga"},sel(0),sel(1)),tab));
+  }
+
   const idx = vista.arg !== null && vista.arg !== undefined && st[vista.arg] ? vista.arg : st.length - 1;
   const sel = h("select", { onchange: ev => { vista.arg = parseInt(ev.target.value, 10); render(); } }, st.map((x, i) => h("option", { value: i, selected: i === idx, text: `${x.nome} (chiusa il ${x.chiusa})` })));
   const x = st[idx];
