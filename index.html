@@ -120,7 +120,7 @@
 
   <div class="blocco" style="margin-top:22px">
     <h2>Accesso amministratore</h2>
-    <p class="dim">L'admin usa un account Supabase Auth. Il vecchio codice admin resta disponibile solo durante la migrazione.</p>
+    <p class="dim">L'admin usa un account Supabase Auth. Il codice di bootstrap serve solo per collegare il primo amministratore di una nuova installazione.</p>
     <input id="admin-email" type="email" placeholder="EMAIL ADMIN" autocomplete="username">
     <div style="height:8px"></div>
     <input id="admin-password" type="password" placeholder="PASSWORD" autocomplete="current-password">
@@ -133,8 +133,8 @@
     <p class="dim">I secondi admin possono entrare senza password tramite Magic Link, dopo essere stati invitati da un admin già attivo.</p>
     <div class="esito err" id="adminerr"></div>
     <div id="collega-admin" class="nascosto" style="margin-top:12px">
-      <p class="dim">Account autenticato, ma non ancora autorizzato come admin. Inserisci una sola volta il vecchio codice admin per collegarlo.</p>
-      <input id="admin-migrazione" type="password" placeholder="VECCHIO CODICE ADMIN" autocomplete="off">
+      <p class="dim">Account autenticato, ma non ancora autorizzato come admin. Se non esiste ancora nessun amministratore, inserisci una sola volta il codice di bootstrap.</p>
+      <input id="admin-migrazione" type="password" placeholder="CODICE DI BOOTSTRAP" autocomplete="off">
       <div class="riga"><button class="n" id="collega-admin-btn">Collega questo account</button></div>
     </div>
   </div>
@@ -1424,7 +1424,7 @@ async function rilancia(importo) {
     caricaAsta().catch(() => {});
   } catch (e) { asEsito("Errore: " + e.message, true); }
 }
-// comandi dell'admin (codice admin)
+// comandi dell'admin (sessione Supabase Auth)
 async function adminAsta(fn, par, okMsg) {
   try {
     const r = await rpc(fn, Object.assign({ p_admin: io.codice }, par || {}));
@@ -1585,7 +1585,7 @@ async function creaAccountAdmin() {
     const d = await authPost("/auth/v1/signup", { email, password });
     if (d.access_token) {
       authAdotta(d, $("#admin-ricorda").checked);
-      $("#adminerr").textContent = "Account creato. Ora collegalo una sola volta con il vecchio codice admin.";
+      $("#adminerr").textContent = "Account creato. Se è il primo amministratore, collegalo una sola volta con il codice di bootstrap.";
       $("#collega-admin").classList.remove("nascosto");
     } else {
       $("#adminerr").textContent = "Account creato. Controlla l'email di conferma, poi torna qui e premi ACCEDI ADMIN.";
@@ -1617,7 +1617,7 @@ async function invitaAdmin(email, esitoEl) {
 
 async function collegaAdmin() {
   const vecchio = $("#admin-migrazione").value.trim();
-  if (!vecchio) { $("#adminerr").textContent = "Inserisci il vecchio codice admin."; return; }
+  if (!vecchio) { $("#adminerr").textContent = "Inserisci il codice di bootstrap."; return; }
   try {
     const r = await rpc("fm_auth_collega_admin", { p_admin: vecchio });
     if (!r.ok) throw new Error(r.errore || "Collegamento rifiutato");
