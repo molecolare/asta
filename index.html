@@ -1233,7 +1233,13 @@ VISTE.impost = function (box) {
       tb.append(h("tr", null, h("td", { text: s.nome }), h("td", { text: c ? c.slice(0,4)+"-"+c.slice(4) : "—" }), h("td", { text: stato }), az));
     });
     card.append(stati.length ? h("div", { class: "tab-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", { text: "Giocatore" }), h("th", { text: "Codice attivo" }), h("th", { text: "Stato" }), h("th", { text: "Azioni" }))), tb)) : h("p", { text: "Nessun giocatore." }),
-      Object.keys(cod).length ? h("div", { class: "riga" }, h("button", { class: "n auto", text: "Copia inviti attivi", onclick: () => copia(testo) })) : null);
+      h("div", { class: "riga" },
+        Object.keys(cod).length ? h("button", { class: "n auto", text: "Copia inviti attivi", onclick: () => copia(testo) }) : null,
+        stati.length ? h("button", { class: "n auto", text: "Nuovi codici per tutti", onclick: async () => {
+          if (!confirm("Generare un nuovo codice per tutti? Gli inviti non ancora usati verranno sostituiti; i dispositivi già associati restano connessi.")) return;
+          try { for (const s of stati) await rpc("fm_auth_rigenera_codice", { p_nome: s.nome }); await carica(); toast("Nuovi codici generati."); render(); }
+          catch (e) { toast(e.message, true); }
+        } }) : null));
     return box.append(card);
   }
   if (vista.sub === "adminauth" && io.ruolo === "admin") {
